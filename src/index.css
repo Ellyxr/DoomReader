@@ -1,0 +1,193 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* X-style palettes mapped onto shadcn's tokens, plus a few reader-specific ones. */
+:root {
+  --radius: 0.75rem;
+  --background: #ffffff;
+  --foreground: #0f1419;
+  --card: #ffffff;
+  --card-foreground: #0f1419;
+  --popover: #ffffff;
+  --popover-foreground: #0f1419;
+  --primary: #1d9bf0;
+  --primary-foreground: #ffffff;
+  --secondary: #eff3f4;
+  --secondary-foreground: #0f1419;
+  --muted: #f7f9f9;
+  --muted-foreground: #536471;
+  --accent: rgba(15, 20, 25, 0.08);
+  --accent-foreground: #0f1419;
+  --destructive: #f4212e;
+  --border: #eff3f4;
+  --input: #cfd9de;
+  --ring: #1d9bf0;
+
+  --like: #f91880;
+  --thread: #cfd9de;
+  --header: rgba(255, 255, 255, 0.85);
+  --hover: rgba(15, 20, 25, 0.03);
+  --pill: #0f1419;
+  --pill-foreground: #ffffff;
+  --pop-shadow: 0 0 15px rgba(101, 119, 134, 0.2), 0 0 3px 1px rgba(101, 119, 134, 0.15);
+
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-read: var(--font-ui);
+  --fs: 17px;
+}
+
+.dark {
+  --background: #000000;
+  --foreground: #e7e9ea;
+  --card: #000000;
+  --card-foreground: #e7e9ea;
+  --popover: #000000;
+  --popover-foreground: #e7e9ea;
+  --primary: #1d9bf0;
+  --primary-foreground: #ffffff;
+  --secondary: #16181c;
+  --secondary-foreground: #e7e9ea;
+  --muted: #16181c;
+  --muted-foreground: #71767b;
+  --accent: rgba(231, 233, 234, 0.1);
+  --accent-foreground: #e7e9ea;
+  --destructive: #f4212e;
+  --border: #2f3336;
+  --input: #333639;
+  --ring: #1d9bf0;
+
+  --thread: #333639;
+  --header: rgba(0, 0, 0, 0.72);
+  --hover: rgba(231, 233, 234, 0.03);
+  --pill: #eff3f4;
+  --pill-foreground: #0f1419;
+  --pop-shadow: 0 0 15px rgba(255, 255, 255, 0.18), 0 0 3px rgba(255, 255, 255, 0.12);
+}
+
+html[data-size='s'] {
+  --fs: 15px;
+}
+html[data-size='l'] {
+  --fs: 19.5px;
+}
+html[data-font='serif'] {
+  --font-read: Charter, 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+}
+
+@theme inline {
+  --font-sans: var(--font-ui);
+  --font-read: var(--font-read);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-like: var(--like);
+  --color-thread: var(--thread);
+  --color-header: var(--header);
+  --color-hover: var(--hover);
+  --color-pill: var(--pill);
+  --color-pill-foreground: var(--pill-foreground);
+  --shadow-pop: var(--pop-shadow);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background font-sans text-[15px] leading-[1.4] text-foreground antialiased;
+  }
+  /* covers the notch area so content doesn't show behind the status bar in standalone mode */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0 0 auto;
+    height: env(safe-area-inset-top, 0px);
+    z-index: 30;
+    background: var(--background);
+  }
+}
+
+@utility px-safe {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* Post bodies are rendered from parsed HTML (only p/h2/h3/blockquote/em/strong/br). */
+.post-text {
+  font-family: var(--font-read);
+  font-size: var(--fs);
+  line-height: 1.5;
+  overflow-wrap: break-word;
+  margin-top: 2px;
+}
+.post-text p {
+  margin: 0 0 0.75em;
+}
+.post-text > :last-child {
+  margin-bottom: 0;
+}
+.post-text em {
+  font-style: italic;
+}
+.post-text .ch {
+  font: 800 22px/1.25 var(--font-ui);
+  letter-spacing: -0.01em;
+  margin: 0 0 0.5em;
+  text-wrap: balance;
+}
+.post-text .sub {
+  font-weight: 700;
+  font-size: 1.05em;
+  line-height: 1.3;
+  margin: 0 0 0.6em;
+}
+.post-text blockquote {
+  margin: 0.4em 0 0.75em;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+.post-text blockquote p {
+  margin: 0 0 0.5em;
+}
+.post-text blockquote p:last-child {
+  margin: 0;
+}
+
+@keyframes like-pop {
+  40% {
+    transform: scale(1.3);
+  }
+}
+.like-pop {
+  animation: like-pop 0.3s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .like-pop {
+    animation: none;
+  }
+}
