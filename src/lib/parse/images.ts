@@ -22,7 +22,7 @@ export function thumbnails(src: CanvasImageSource & { width: number; height: num
   return { avatar: a.toDataURL('image/jpeg', 0.82), cover: c.toDataURL('image/jpeg', 0.8) }
 }
 
-export async function thumbnailsFromBlob(blob: Blob) {
+async function withImage<T>(blob: Blob, fn: (img: HTMLImageElement) => T | Promise<T>) {
   const url = URL.createObjectURL(blob)
   try {
     const img = await new Promise<HTMLImageElement>((ok, no) => {
@@ -31,8 +31,34 @@ export async function thumbnailsFromBlob(blob: Blob) {
       im.onerror = no
       im.src = url
     })
-    return thumbnails(img)
+    return await fn(img)
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+export const thumbnailsFromBlob = (blob: Blob) => withImage(blob, thumbnails)
+
+const MEDIA_MAX = 1600
+const MEDIA_MAX_BYTES = 1.5 * 1024 * 1024
+
+/**
+ * Measures a book picture for the feed and shrinks it when it is bigger than a phone screen needs. Ornaments and
+ * spacer images (under 48px) return null. GIFs and SVGs are kept as they are, so animation and sharpness survive.
+ */
+export function fitImage(blob: Blob) {
+  return withImage(blob, async img => {
+    const w = img.naturalWidth || img.width
+    const h = img.naturalHeight || img.height
+    if (!w || !h || (w < 48 && h < 48)) return null
+    const keep = /gif|svg/.test(blob.type) || (Math.max(w, h) <= MEDIA_MAX && blob.size <= MEDIA_MAX_BYTES)
+    if (keep) return { blob, w, h }
+    const s = Math.min(1, MEDIA_MAX / Math.max(w, h))
+    const c = document.createElement('canvas')
+    c.width = Math.round(w * s)
+    c.height = Math.round(h * s)
+    c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
+    const out = await new Promise<Blob | null>(ok => c.toBlob(ok, 'image/webp', 0.85))
+    return { blob: out && out.size < blob.size ? out : blob, w: c.width, h: c.height }
+  })
 }

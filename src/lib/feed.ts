@@ -5,14 +5,20 @@ export const CHARS_PER_MIN = 1320 // about 240 words a minute at 5.5 characters 
 
 export type PostLength = 's' | 'm' | 'l'
 
-/** The smallest unit of the feed: a chapter title, heading, paragraph or a slice of a long paragraph. */
+/** The smallest unit of the feed: a chapter title, heading, paragraph, a slice of a long paragraph, or a picture. */
 export interface Segment {
   ch: number
-  k: 't' | 'h' | 'p' | 'q'
+  k: 't' | 'h' | 'p' | 'q' | 'i'
   html: string
   len: number
   para: number
+  img?: string
+  w?: number
+  h?: number
 }
+
+/** Pictures per post, as on X. */
+const MEDIA_PER_POST = 4
 
 export interface Post {
   i: number
@@ -88,6 +94,10 @@ export function buildSegments(chapters: Chapter[]): Segment[] {
     segs.push({ ch: ci, k: 't', html: esc(ch.title), len: 0, para: para++ })
     ch.blocks.forEach(b => {
       const pid = para++
+      if (b.k === 'i') {
+        segs.push({ ch: ci, k: 'i', html: b.html, len: 0, para: pid, img: b.img, w: b.w, h: b.h })
+        return
+      }
       const len = textOf(b.html).length
       if (b.k === 'h') {
         segs.push({ ch: ci, k: 'h', html: b.html, len, para: pid })
@@ -107,7 +117,14 @@ export function buildPosts(segs: Segment[], length: PostLength): { posts: Post[]
   let acc = 0
   segs.forEach((s, i) => {
     const hasBody = cur && cur.segs.some(x => x.k !== 't')
-    if (!cur || cur.ch !== s.ch || (hasBody && s.k !== 't' && (s.k === 'h' || cur.len + s.len > target))) {
+    // pictures close a post, like media under a tweet; the text after them starts the next one
+    const media = cur ? cur.segs.filter(x => x.k === 'i').length : 0
+    const afterMedia = s.k === 'i' ? media >= MEDIA_PER_POST : media > 0
+    if (
+      !cur ||
+      cur.ch !== s.ch ||
+      (hasBody && s.k !== 't' && (s.k === 'h' || cur.len + s.len > target || afterMedia))
+    ) {
       cur = { i: 0, ch: s.ch, s: i, segs: [], len: 0, before: acc, prev: false, next: false, pct: 0 }
       posts.push(cur)
     }
@@ -158,6 +175,10 @@ export function bodyHtml(p: Post) {
   let i = 0
   while (i < ss.length) {
     const s = ss[i]
+    if (s.k === 'i') {
+      i++
+      continue
+    }
     if (s.k === 't') {
       blocks.push({ k: 't', html: s.html })
       i++
@@ -191,6 +212,48 @@ export function bodyHtml(p: Post) {
 
 export const plainText = (p: Post) =>
   p.segs
-    .filter(s => s.k !== 't')
+    .filter(s => s.k !== 't' && s.k !== 'i')
     .map(s => textOf(s.html))
     .join('\n\n')
+
+export const postImages = (p: Post) => p.segs.filter(s => s.k === 'i')
+
+/**
+ * What text-to-speech reads for a post, one utterance per segment. Segments are at most a few hundred characters,
+ * which keeps clear of Chrome's habit of stalling on long utterances.
+ */
+export const speechChunks = (p: Post) =>
+  p.segs
+    .filter(s => s.k !== 'i')
+    .map(s => textOf(s.html).trim())
+    .filter(Boolean)
+
+export interface SearchHit {
+  seg: number
+  ch: number
+  text: string
+  at: number
+}
+
+/** Case- and accent-insensitive search over the book's text. Each hit is the segment and where the match starts. */
+export function searchBook(segs: Segment[], query: string, limit = 200) {
+  const fold = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+  const q = fold(query.trim())
+  const hits: SearchHit[] = []
+  let total = 0
+  if (q.length < 2) return { hits, total, length: q.length }
+  segs.forEach((s, seg) => {
+    if (s.k === 'i' || s.k === 't') return
+    const text = textOf(s.html)
+    // folding can change length (e.g. "ﬁ"), so only fold when it doesn't, to keep match offsets right
+    const folded = fold(text)
+    const hay = folded.length === text.length ? folded : text.toLowerCase()
+    let at = hay.indexOf(q)
+    while (at > -1) {
+      total++
+      if (hits.length < limit) hits.push({ seg, ch: s.ch, text, at })
+      at = hay.indexOf(q, at + q.length)
+    }
+  })
+  return { hits, total, length: q.length }
+}

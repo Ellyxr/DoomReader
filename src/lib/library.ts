@@ -4,6 +4,9 @@ import type { BookFormat, BookMeta, ParsedBook } from '@/lib/types'
 
 export const ACCEPT = '.epub,.pdf,application/epub+zip,application/pdf'
 
+/** Bigger files are refused before parsing; a book this size would only freeze the tab. */
+export const MAX_BOOK_BYTES = 300 * 1024 * 1024
+
 async function sniff(file: File): Promise<BookFormat | null> {
   const head = new Uint8Array(await file.slice(0, 5).arrayBuffer())
   const magic = String.fromCharCode(...head)
@@ -47,6 +50,7 @@ export interface ImportResult {
 }
 
 export async function importFile(file: File, onProgress?: (done: number, total: number) => void): Promise<ImportResult> {
+  if (file.size > MAX_BOOK_BYTES) throw new Error(`${file.name} is over ${MAX_BOOK_BYTES >> 20} MB, too big to open.`)
   const format = await sniff(file)
   if (!format) throw new Error(`${file.name} is not an EPUB or PDF.`)
   const id = await fileId(file)
@@ -58,7 +62,7 @@ export async function importFile(file: File, onProgress?: (done: number, total: 
       ? await (await import('@/lib/parse/pdf')).parsePdf(file, onProgress)
       : await (await import('@/lib/parse/epub')).parseEpub(file, onProgress)
 
-  await addBook(toMeta(id, book, format, file), book.chapters)
+  await addBook(toMeta(id, book, format, file), book.chapters, book.images)
   return { id, title: book.title, duplicate: false }
 }
 

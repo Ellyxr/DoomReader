@@ -22,7 +22,10 @@ export const HeartIcon = (p: SVGProps<SVGSVGElement>) => (
     {...p}
   />
 )
-export const ViewsIcon = (p: SVGProps<SVGSVGElement>) => <Stroke d="M5 20V11M12 20V4M19 20v-6" {...p} />
+export const ReplyIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Stroke d="M4 11.5C4 7.4 7.6 4 12 4s8 3.4 8 7.5-3.6 7.5-8 7.5c-1 0-2-.2-2.9-.5L4.5 20.5l1.2-4C4.6 15.1 4 13.4 4 11.5z" {...p} />
+)
+export const ViewsIcon =(p: SVGProps<SVGSVGElement>) => <Stroke d="M5 20V11M12 20V4M19 20v-6" {...p} />
 export const BookmarkIcon = (p: SVGProps<SVGSVGElement>) => <Stroke d="M6 3.5h12v17l-6-4.5-6 4.5z" {...p} />
 export const ShareIcon = (p: SVGProps<SVGSVGElement>) => (
   <Stroke d="M12 15V3.5m0 0L7.5 8M12 3.5L16.5 8M5 12v6.5a2 2 0 002 2h10a2 2 0 002-2V12" {...p} />

@@ -1,6 +1,6 @@
 import { openDB, type DBSchema } from 'idb'
 
-import type { BookMeta, Chapter, ReadingState } from '@/lib/types'
+import type { BookImage, BookMeta, Chapter, ReadingState } from '@/lib/types'
 
 /**
  * Everything lives in this browser's IndexedDB. Nothing leaves the device; the library is gone only
@@ -10,15 +10,22 @@ interface Schema extends DBSchema {
   books: { key: string; value: BookMeta }
   content: { key: string; value: { id: string; chapters: Chapter[] } }
   state: { key: string; value: ReadingState }
+  /** Book pictures, keyed "<book id>/<image key>". */
+  images: { key: string; value: BookImage & { id: string } }
 }
 
-const dbp = openDB<Schema>('doomreader', 1, {
-  upgrade(db) {
-    db.createObjectStore('books', { keyPath: 'id' })
-    db.createObjectStore('content', { keyPath: 'id' })
-    db.createObjectStore('state', { keyPath: 'id' })
+const dbp = openDB<Schema>('doomreader', 2, {
+  upgrade(db, oldVersion) {
+    if (oldVersion < 1) {
+      db.createObjectStore('books', { keyPath: 'id' })
+      db.createObjectStore('content', { keyPath: 'id' })
+      db.createObjectStore('state', { keyPath: 'id' })
+    }
+    if (oldVersion < 2) db.createObjectStore('images', { keyPath: 'id' })
   },
 })
+
+const imagesOf = (book: string) => IDBKeyRange.bound(`${book}/`, `${book}/￿`)
 
 const CHANGED = 'doomreader:library-changed'
 const changed = () => window.dispatchEvent(new Event(CHANGED))
@@ -43,27 +50,61 @@ export async function hasBook(id: string) {
   return (await (await dbp).getKey('books', id)) !== undefined
 }
 
-export async function addBook(meta: BookMeta, chapters: Chapter[]) {
+export async function addBook(
+  meta: BookMeta,
+  chapters: Chapter[],
+  images: Record<string, BookImage> = {},
+  state?: ReadingState,
+) {
   const db = await dbp
-  const tx = db.transaction(['books', 'content'], 'readwrite')
-  await Promise.all([tx.objectStore('books').put(meta), tx.objectStore('content').put({ id: meta.id, chapters }), tx.done])
-  changed()
-}
-
-export async function deleteBook(id: string) {
-  const db = await dbp
-  const tx = db.transaction(['books', 'content', 'state'], 'readwrite')
+  const tx = db.transaction(['books', 'content', 'images', 'state'], 'readwrite')
+  const store = tx.objectStore('images')
   await Promise.all([
-    tx.objectStore('books').delete(id),
-    tx.objectStore('content').delete(id),
-    tx.objectStore('state').delete(id),
+    tx.objectStore('books').put(meta),
+    tx.objectStore('content').put({ id: meta.id, chapters }),
+    ...Object.entries(images).map(([k, img]) => store.put({ ...img, id: `${meta.id}/${k}` })),
+    state && tx.objectStore('state').put(state),
     tx.done,
   ])
   changed()
 }
 
+export async function deleteBook(id: string) {
+  const db = await dbp
+  const tx = db.transaction(['books', 'content', 'state', 'images'], 'readwrite')
+  await Promise.all([
+    tx.objectStore('books').delete(id),
+    tx.objectStore('content').delete(id),
+    tx.objectStore('state').delete(id),
+    tx.objectStore('images').delete(imagesOf(id)),
+    tx.done,
+  ])
+  changed()
+}
+
+export async function getImage(book: string, key: string) {
+  return (await dbp).get('images', `${book}/${key}`)
+}
+
+/** Everything stored for one book, for a backup. */
+export async function exportBook(id: string) {
+  const db = await dbp
+  const [meta, content, state, images] = await Promise.all([
+    db.get('books', id),
+    db.get('content', id),
+    db.get('state', id),
+    db.getAll('images', imagesOf(id)),
+  ])
+  if (!meta || !content) return null
+  return { meta, chapters: content.chapters, state, images }
+}
+
 export async function getState(id: string) {
   return (await dbp).get('state', id)
+}
+
+export async function putState(state: ReadingState) {
+  await (await dbp).put('state', state)
 }
 
 /** Saves the reading position and marks, and the progress shown in the library. */

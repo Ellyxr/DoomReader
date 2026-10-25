@@ -11,7 +11,7 @@ export interface Prefs {
   theme: Theme
 }
 
-// Must match the inline script in index.html that applies the theme before first paint.
+// Must match public/theme.js, which applies the theme before first paint.
 const KEY = 'doomreader:prefs'
 const DEFAULTS: Prefs = { len: 'm', size: 'm', font: 'sans', theme: 'system' }
 

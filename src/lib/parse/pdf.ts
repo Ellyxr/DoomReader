@@ -3,7 +3,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 import type { Block, Chapter, ParsedBook } from '@/lib/types'
-import { esc, yieldToBrowser } from './html'
+import { esc, textOf, yieldToBrowser } from './html'
 import { thumbnails } from './images'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
@@ -194,8 +194,9 @@ function chaptersFromHeadings(blocks: PageBlock[], body: number, pageCount: numb
   let cur: Chapter | null = null
   for (const b of blocks) {
     if (isTop(b)) {
-      if (cur && !cur.blocks.length) cur.title += ': ' + b.html.replace(/&amp;/g, '&')
-      else chapters.push((cur = { title: b.html.replace(/&amp;/g, '&'), blocks: [] }))
+      // titles are plain text (escaped again when shown), so undo the block's escaping in full
+      if (cur && !cur.blocks.length) cur.title += ': ' + textOf(b.html)
+      else chapters.push((cur = { title: textOf(b.html), blocks: [] }))
       continue
     }
     if (!cur) chapters.push((cur = { title: 'Front matter', blocks: [] }))
@@ -240,7 +241,13 @@ async function renderCover(doc: PDFDocumentProxy) {
 }
 
 export async function parsePdf(file: File, onProgress?: Progress): Promise<ParsedBook> {
-  const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) })
+  const task = pdfjs.getDocument({
+    data: new Uint8Array(await file.arrayBuffer()),
+    // no WebAssembly decoders, so the Content-Security-Policy needn't allow wasm; pdf.js falls back to plain JS
+    useWasm: false,
+    // a hostile PDF can't make the cover render allocate a gigantic image
+    maxImageSize: 64 * 1024 * 1024,
+  })
   let doc: PDFDocumentProxy
   try {
     doc = await task.promise

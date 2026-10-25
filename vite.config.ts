@@ -1,10 +1,22 @@
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// `npm run preview` sends the same security headers as the Vercel deployment, so the CSP can be tested locally
+const vercel = JSON.parse(readFileSync(path.resolve(import.meta.dirname, 'vercel.json'), 'utf8'))
+const securityHeaders: Record<string, string> = Object.fromEntries(
+  vercel.headers
+    .find((h: { source: string }) => h.source === '/(.*)')
+    .headers.filter((h: { key: string }) => h.key !== 'Strict-Transport-Security')
+    // preview runs on plain http://localhost, so leave out the https-only parts
+    .map((h: { key: string; value: string }) => [h.key, h.value.replace(/;\s*upgrade-insecure-requests/, '')]),
+)
+
 export default defineConfig({
+  preview: { headers: securityHeaders },
   plugins: [
     react(),
     tailwindcss(),

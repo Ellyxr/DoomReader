@@ -1,5 +1,17 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft } from 'lucide-react'
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  ArrowLeft,
+  Copy,
+  Headphones,
+  Highlighter,
+  MessageSquarePlus,
+  Pause,
+  Pencil,
+  Play,
+  Search,
+  Square,
+  X,
+} from 'lucide-react'
 import { Link, useParams } from 'react-router'
 import { toast } from 'sonner'
 
@@ -7,20 +19,48 @@ import { BookAvatar } from '@/components/BookAvatar'
 import { Fab } from '@/components/Fab'
 import { PinIcon } from '@/components/icons'
 import { useImporter } from '@/components/Importer'
-import { PostCard, PostShell, type Author, type PostAction } from '@/components/PostCard'
+import { NoteComposer, type Draft } from '@/components/NoteComposer'
+import { ago, PostCard, PostShell, QuoteMark, YouAvatar, type Author, type PostAction } from '@/components/PostCard'
 import { SettingsPopover } from '@/components/SettingsPopover'
 import { Button } from '@/components/ui/button'
 import { usePrefs } from '@/hooks/prefs'
+import { useSentenceSelect } from '@/hooks/useSentenceSelect'
+import { RATES, speechSupported, useSpeech } from '@/hooks/useSpeech'
 import { getBook, getState, markOpened, saveState } from '@/lib/db'
-import { buildPosts, buildSegments, CHARS_PER_MIN, isOn, plainText, postIndexOfSeg, toggled, type Post } from '@/lib/feed'
-import type { BookMeta, Chapter } from '@/lib/types'
+import {
+  buildPosts,
+  buildSegments,
+  CHARS_PER_MIN,
+  isOn,
+  plainText,
+  postIndexOfSeg,
+  searchBook,
+  toggled,
+  type Post,
+  type Segment,
+} from '@/lib/feed'
+import { segOfQuote } from '@/lib/highlight'
+import type { BookMeta, Chapter, Note } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
-type Tab = 'feed' | 'chapters' | 'saved'
+type Tab = 'feed' | 'chapters' | 'saved' | 'notes' | 'search'
 const TABS: [Tab, string][] = [
   ['feed', 'Reading'],
   ['chapters', 'Chapters'],
   ['saved', 'Saved'],
+  ['notes', 'Notes'],
 ]
+type Saved = { seg: number; likes: number[]; marks: number[]; notes?: Note[] }
+
+const vibrateOnce = () => {
+  try {
+    navigator.vibrate?.(15)
+  } catch {
+    /* not on this device */
+  }
+}
+
+const newId = () => globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2)
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
 
 async function copyText(txt: string) {
@@ -37,7 +77,7 @@ export default function Reader() {
   const [loaded, setLoaded] = useState<{
     id: string
     book: { meta: BookMeta; chapters: Chapter[] } | null
-    saved: { seg: number; likes: number[]; marks: number[] }
+    saved: Saved
   } | null>(null)
 
   useEffect(() => {
@@ -82,7 +122,7 @@ function Feed({
 }: {
   meta: BookMeta
   chapters: Chapter[]
-  saved: { seg: number; likes: number[]; marks: number[] }
+  saved: Saved
 }) {
   const prefs = usePrefs()
   const segs = useMemo(() => buildSegments(chapters), [chapters])
@@ -91,6 +131,11 @@ function Feed({
   const [tab, setTab] = useState<Tab>('feed')
   const [likes, setLikes] = useState(() => new Set(saved.likes))
   const [marks, setMarks] = useState(() => new Set(saved.marks))
+  const [notes, setNotes] = useState<Note[]>(() => saved.notes ?? [])
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [flash, setFlash] = useState<number | null>(null)
+  const [query, setQuery] = useState('')
+  const deferredQuery = useDeferredValue(query)
   const [cur, setCur] = useState(() => postIndexOfSeg(posts, saved.seg))
   const [atEnd, setAtEnd] = useState(false)
   const [rendered, setRendered] = useState(() => cur + 12)
@@ -100,9 +145,20 @@ function Feed({
       title: meta.title,
       avatar: meta.avatar,
       handle: '@' + (meta.author.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 15) || 'reader'),
+      book: meta.id,
     }),
     [meta],
   )
+
+  // notes grouped by the post they belong to at the current post length (arrays stay stable for memoized posts)
+  const notesByPost = useMemo(() => {
+    const m = new Map<number, Note[]>()
+    for (const n of notes) {
+      const i = postIndexOfSeg(posts, n.seg)
+      m.set(i, [...(m.get(i) ?? []), n])
+    }
+    return m
+  }, [notes, posts])
 
   const headerRef = useRef<HTMLElement>(null)
   const feedRef = useRef<HTMLDivElement>(null)
@@ -111,17 +167,17 @@ function Feed({
   const feedY = useRef(0)
 
   // latest values for callbacks that must stay stable (so memoized posts don't re-render)
-  const live = useRef({ posts, cur, likes, marks, tab, meta })
+  const live = useRef({ posts, cur, likes, marks, notes, tab, meta })
   useLayoutEffect(() => {
-    live.current = { posts, cur, likes, marks, tab, meta }
+    live.current = { posts, cur, likes, marks, notes, tab, meta }
   })
 
   /* ---------- saving ---------- */
   const persist = useCallback(() => {
-    const { posts, cur, likes, marks, meta } = live.current
+    const { posts, cur, likes, marks, notes, meta } = live.current
     const p = posts[cur]
     if (!p) return
-    void saveState({ id: meta.id, seg: p.s, likes: [...likes], marks: [...marks] }, p.pct)
+    void saveState({ id: meta.id, seg: p.s, likes: [...likes], marks: [...marks], notes }, p.pct)
   }, [])
   const saveTimer = useRef(0)
   const saveSoon = useCallback(() => {
@@ -236,13 +292,35 @@ function Feed({
   }, [])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || (e.target as Element).closest?.('input,textarea')) return
+      if (e.key === 'Escape' && live.current.tab === 'search' && !document.querySelector('[role=dialog]')) {
+        switchTab('feed')
+        return
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey || (e.target as Element).closest?.('input,textarea,[role=dialog]')) return
+      if (e.key === '/') {
+        e.preventDefault()
+        switchTab('search')
+        return
+      }
       if (live.current.tab !== 'feed' || (e.key !== 'j' && e.key !== 'k')) return
       scrollToPost(live.current.cur + (e.key === 'j' ? 1 : -1), true)
     }
     addEventListener('keydown', onKey)
     return () => removeEventListener('keydown', onKey)
-  }, [scrollToPost])
+  }, [scrollToPost, switchTab])
+
+  /** Opens the feed at post `i` (from chapters, search or a note), optionally flashing it so it is easy to spot. */
+  const jumpTo = useCallback((i: number, highlight = false) => {
+    pending.current = { i, smooth: false }
+    setRendered(r => Math.max(r, i + 10))
+    setTab('feed')
+    if (highlight) setFlash(i)
+  }, [])
+  useEffect(() => {
+    if (flash === null) return
+    const t = setTimeout(() => setFlash(null), 1800)
+    return () => clearTimeout(t)
+  }, [flash])
 
   /* ---------- post actions ---------- */
   const onAction = useCallback(
@@ -253,11 +331,83 @@ function Feed({
         toast(ok ? 'Copied to clipboard' : 'Copying is not available here')
         return
       }
+      if (action === 'reply') {
+        setDraft({ post: p })
+        return
+      }
       if (action === 'like') setLikes((live.current.likes = toggled(live.current.likes, p)))
       else setMarks((live.current.marks = toggled(live.current.marks, p)))
       persist()
     },
     [persist],
+  )
+
+  /* ---------- notes ---------- */
+  const setAndSaveNotes = (next: Note[]) => {
+    live.current.notes = next
+    setNotes(next)
+    persist()
+  }
+  const saveDraft = (text: string) => {
+    if (!draft) return
+    const { post, quote, note } = draft
+    if (note) setAndSaveNotes(notes.map(n => (n.id === note.id ? { ...n, text } : n)))
+    else {
+      const seg = quote ? segOfQuote(post, quote) : post.s
+      setAndSaveNotes([...notes, { id: newId(), seg, text, at: Date.now(), ...(quote ? { quote } : {}) }])
+      toast(quote ? 'Quote saved to Notes' : 'Reply saved to Notes')
+    }
+    setDraft(null)
+  }
+  const deleteDraft = () => {
+    if (!draft?.note) return
+    const gone = draft.note
+    setAndSaveNotes(notes.filter(n => n.id !== gone.id))
+    setDraft(null)
+    toast('Note deleted', {
+      action: { label: 'Undo', onClick: () => setAndSaveNotes([...live.current.notes, gone].sort((a, b) => a.at - b.at)) },
+    })
+  }
+  const editNote = useCallback((n: Note) => {
+    const { posts } = live.current
+    const post = posts[postIndexOfSeg(posts, n.seg)]
+    if (post) setDraft({ post, note: n })
+  }, [])
+
+  /* ---------- selecting passages ---------- */
+  const { sel, clear: clearSel } = useSentenceSelect(posts)
+  /** Saves the selection as a quote straight away; a note can be added from the toast, or later by tapping it. */
+  const saveQuote = () => {
+    if (!sel) return
+    const post = posts[sel.post]
+    const note: Note = { id: newId(), seg: segOfQuote(post, sel.quote), quote: sel.quote, text: '', at: Date.now() }
+    setAndSaveNotes([...notes, note])
+    clearSel()
+    vibrateOnce()
+    toast('Quote saved', {
+      description: 'Tap the highlight any time to add a note.',
+      action: { label: 'Add note', onClick: () => setDraft({ post, note }) },
+    })
+  }
+  // toasts sit where the action bar goes (and above it), so starting a selection clears them away
+  const selecting = !!sel
+  useEffect(() => {
+    if (selecting) toast.dismiss()
+  }, [selecting])
+  useEffect(() => {
+    if (!sel) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !draft && clearSel()
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [sel, draft, clearSel])
+
+  /* ---------- read aloud ---------- */
+  const speech = useSpeech(
+    posts,
+    i => {
+      if (live.current.tab === 'feed') scrollToPost(i, true)
+    },
+    () => toast('Read aloud stopped', { description: 'This browser could not play its voice.' }),
   )
 
   /* ---------- render ---------- */
@@ -287,24 +437,51 @@ function Feed({
               {pct}% · {chapters[current?.ch ?? 0]?.title}
             </div>
           </div>
+          <button
+            aria-label="Search this book"
+            title="Search this book (/)"
+            onClick={() => switchTab(tab === 'search' ? 'feed' : 'search')}
+            className="grid size-[38px] shrink-0 place-items-center rounded-full hover:bg-accent aria-pressed:text-primary"
+            aria-pressed={tab === 'search'}
+          >
+            <Search className="size-5" />
+          </button>
+          {speechSupported && (
+            <button
+              aria-label={speech.playing ? 'Pause reading aloud' : 'Read aloud'}
+              title={speech.playing ? 'Pause reading aloud' : 'Read aloud'}
+              onClick={() => (speech.playing ? speech.pause() : speech.play(cur))}
+              className="grid size-[38px] shrink-0 place-items-center rounded-full hover:bg-accent aria-pressed:text-primary"
+              aria-pressed={speech.post !== null}
+            >
+              <Headphones className="size-5" />
+            </button>
+          )}
           <SettingsPopover reader />
         </div>
-        <div className="flex" role="tablist">
-          {TABS.map(([t, label]) => (
-            <button
-              key={t}
-              role="tab"
-              aria-selected={tab === t}
-              onClick={() => switchTab(t)}
-              className="grid h-[53px] flex-1 place-items-center font-medium text-muted-foreground hover:bg-accent aria-selected:font-bold aria-selected:text-foreground"
-            >
-              <span className="relative inline-block py-[15px]">
-                {label}
-                {tab === t && <span className="absolute inset-x-0 bottom-0 h-1 rounded-full bg-primary" />}
-              </span>
-            </button>
-          ))}
-        </div>
+        {tab === 'search' ? (
+          <SearchBox query={query} onQuery={setQuery} onClose={() => switchTab('feed')} />
+        ) : (
+          <div className="flex" role="tablist">
+            {TABS.map(([t, label]) => (
+              <button
+                key={t}
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => switchTab(t)}
+                className="grid h-[53px] flex-1 place-items-center font-medium text-muted-foreground hover:bg-accent aria-selected:font-bold aria-selected:text-foreground"
+              >
+                <span className="relative inline-block py-[15px]">
+                  {label}
+                  {t === 'notes' && notes.length > 0 && (
+                    <span className="ml-1 text-[13px] text-muted-foreground tabular-nums">{notes.length}</span>
+                  )}
+                  {tab === t && <span className="absolute inset-x-0 bottom-0 h-1 rounded-full bg-primary" />}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="h-0.5 bg-border">
           <i
             className="block h-full bg-primary transition-[width] duration-200 ease-linear motion-reduce:transition-none"
@@ -324,7 +501,13 @@ function Feed({
                 author={author}
                 liked={isOn(likes, p)}
                 marked={isOn(marks, p)}
+                notes={notesByPost.get(p.i)}
+                speaking={speech.post === p.i}
+                flash={flash === p.i}
+                selA={sel && !sel.native && sel.post === p.i ? sel.a : undefined}
+                selB={sel && !sel.native && sel.post === p.i ? sel.b : undefined}
                 onAction={onAction}
+                onNote={editNote}
               />
             ))}
           </div>
@@ -338,23 +521,354 @@ function Feed({
         </section>
 
         {tab === 'chapters' && (
-          <ChapterList
-            chapters={chapters}
-            posts={posts}
-            current={current?.ch ?? 0}
-            onOpen={i => {
-              pending.current = { i, smooth: false }
-              setRendered(r => Math.max(r, i + 10))
-              setTab('feed')
-            }}
-          />
+          <ChapterList chapters={chapters} posts={posts} current={current?.ch ?? 0} onOpen={i => jumpTo(i)} />
         )}
 
         {tab === 'saved' && <SavedList posts={posts} author={author} likes={likes} marks={marks} onAction={onAction} />}
+
+        {tab === 'notes' && (
+          <NotesList
+            notes={notes}
+            posts={posts}
+            author={author}
+            onOpen={n => jumpTo(postIndexOfSeg(posts, n.seg), true)}
+            onEdit={editNote}
+          />
+        )}
+
+        {tab === 'search' && (
+          <SearchResults
+            segs={segs}
+            query={deferredQuery}
+            chapters={chapters}
+            onOpen={seg => jumpTo(postIndexOfSeg(posts, seg), true)}
+          />
+        )}
       </main>
+
+      {sel && !sel.dragging && !draft && (
+        <SelectionBar
+          quote={sel.quote}
+          count={sel.count}
+          onSave={saveQuote}
+          onNote={() => {
+            setDraft({ post: posts[sel.post], quote: sel.quote })
+            clearSel()
+          }}
+          onCopy={async () => {
+            const ok = await copyText(`“${sel.quote}”\n\n— ${meta.author}, ${meta.title}`)
+            toast(ok ? 'Copied to clipboard' : 'Copying is not available here')
+            clearSel()
+          }}
+          onClose={clearSel}
+        />
+      )}
+
+      {speech.post !== null && !sel && (
+        <Player
+          playing={speech.playing}
+          rate={speech.rate}
+          label={chapters[posts[speech.post]?.ch ?? 0]?.title ?? ''}
+          onToggle={() => (speech.playing ? speech.pause() : speech.play(speech.post ?? cur))}
+          onStop={speech.stop}
+          onRate={speech.setRate}
+        />
+      )}
+
+      <NoteComposer
+        draft={draft}
+        author={author}
+        onClose={() => setDraft(null)}
+        onSave={saveDraft}
+        onDelete={deleteDraft}
+      />
 
       <Fab />
     </div>
+  )
+}
+
+/**
+ * What to do with a selected passage, docked at the bottom where a thumb reaches it. Big targets; the mouse-down is
+ * swallowed so clicking a button doesn't collapse a mouse selection before the click lands.
+ */
+function SelectionBar({
+  quote,
+  count,
+  onSave,
+  onNote,
+  onCopy,
+  onClose,
+}: {
+  quote: string
+  count: number
+  onSave: () => void
+  onNote: () => void
+  onCopy: () => void
+  onClose: () => void
+}) {
+  const btn =
+    'flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[13px] font-bold active:scale-[0.97] transition-transform'
+  return (
+    <div
+      data-selbar
+      role="toolbar"
+      aria-label="Selected passage"
+      onMouseDown={e => e.preventDefault()}
+      className="fixed inset-x-0 bottom-0 mx-auto max-w-[600px] px-3 pb-[calc(12px+env(safe-area-inset-bottom,0px))] select-none"
+      // above sonner's toasts (z-index 999999999), so one that is still fading out can't swallow a tap meant for the bar
+      style={{ zIndex: 1_000_000_000 }}
+    >
+      <div className="rounded-2xl border bg-background p-3 shadow-pop animate-in fade-in-0 slide-in-from-bottom-4">
+        <div className="mb-2.5 flex items-start gap-2">
+          <p className="line-clamp-2 min-w-0 flex-1 font-read text-[14px] leading-snug text-muted-foreground">
+            “{quote}”
+          </p>
+          <button
+            onClick={onClose}
+            aria-label="Cancel selection"
+            className="-mt-1 -mr-1 grid size-9 shrink-0 place-items-center rounded-full hover:bg-accent"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+        {count > 0 && (
+          <p className="touch-only mb-2.5 text-[12px] text-muted-foreground">
+            {count} {count === 1 ? 'sentence' : 'sentences'} · drag while holding, or tap another sentence to extend
+          </p>
+        )}
+        <div className="grid grid-cols-3 gap-2">
+          <button onClick={onSave} className={cn(btn, 'bg-primary text-white hover:bg-[#1a8cd8]')}>
+            <Highlighter className="size-5" />
+            Save quote
+          </button>
+          <button onClick={onNote} className={cn(btn, 'bg-secondary hover:bg-accent')}>
+            <MessageSquarePlus className="size-5" />
+            Add note
+          </button>
+          <button onClick={onCopy} className={cn(btn, 'bg-secondary hover:bg-accent')}>
+            <Copy className="size-5" />
+            Copy
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Player({
+  playing,
+  rate,
+  label,
+  onToggle,
+  onStop,
+  onRate,
+}: {
+  playing: boolean
+  rate: number
+  label: string
+  onToggle: () => void
+  onStop: () => void
+  onRate: (r: number) => void
+}) {
+  const next = RATES[(RATES.indexOf(rate as (typeof RATES)[number]) + 1) % RATES.length]
+  return (
+    <div
+      role="region"
+      aria-label="Read aloud"
+      className="fixed z-25 flex h-14 items-center gap-1 rounded-full border bg-background pr-2 pl-1.5 shadow-pop"
+      style={{
+        bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
+        left: 'calc(max(16px, (100vw - 600px) / 2 + 16px) + env(safe-area-inset-left, 0px))',
+        maxWidth: 'calc(min(100vw, 600px) - 32px - 56px - 12px)',
+      }}
+    >
+      <button
+        onClick={onToggle}
+        aria-label={playing ? 'Pause' : 'Resume'}
+        className="grid size-11 shrink-0 place-items-center rounded-full bg-primary text-white hover:bg-[#1a8cd8]"
+      >
+        {playing ? <Pause className="size-5 fill-current" /> : <Play className="size-5 fill-current" />}
+      </button>
+      <span className="min-w-0 flex-1 truncate px-2 text-[13px]">
+        <b className="block font-bold">{playing ? 'Reading aloud' : 'Paused'}</b>
+        <span className="text-muted-foreground">{label}</span>
+      </span>
+      <button
+        onClick={() => onRate(next)}
+        aria-label={`Speed ${rate}×, change to ${next}×`}
+        className="h-9 shrink-0 rounded-full px-2 text-[13px] font-bold tabular-nums hover:bg-accent"
+      >
+        {rate}×
+      </button>
+      <button
+        onClick={onStop}
+        aria-label="Stop reading aloud"
+        className="grid size-9 shrink-0 place-items-center rounded-full hover:bg-accent"
+      >
+        <Square className="size-4 fill-current" />
+      </button>
+    </div>
+  )
+}
+
+function SearchBox({ query, onQuery, onClose }: { query: string; onQuery: (q: string) => void; onClose: () => void }) {
+  return (
+    <div className="flex items-center gap-2 pb-3 px-safe">
+      <div className="relative flex-1">
+        <Search className="pointer-events-none absolute top-2.5 left-3.5 size-4 text-muted-foreground" />
+        <input
+          autoFocus
+          type="search"
+          value={query}
+          onChange={e => onQuery(e.target.value)}
+          placeholder="Search this book"
+          aria-label="Search this book"
+          enterKeyHint="search"
+          className="h-9 w-full rounded-full border border-transparent bg-secondary pr-4 pl-10 outline-none focus:border-primary focus:bg-background"
+        />
+      </div>
+      <button
+        onClick={onClose}
+        aria-label="Close search"
+        className="grid size-9 shrink-0 place-items-center rounded-full hover:bg-accent"
+      >
+        <X className="size-5" />
+      </button>
+    </div>
+  )
+}
+
+function SearchResults({
+  segs,
+  query,
+  chapters,
+  onOpen,
+}: {
+  segs: Segment[]
+  query: string
+  chapters: Chapter[]
+  onOpen: (seg: number) => void
+}) {
+  const { hits, total, length } = useMemo(() => searchBook(segs, query), [segs, query])
+  if (length < 2)
+    return (
+      <div className="mx-auto max-w-[420px] px-8 py-12">
+        <h3 className="mb-2 text-[31px] leading-[1.1] font-extrabold tracking-tight">Search this book</h3>
+        <p className="text-muted-foreground">Find a word, a name or a line you remember. Tap a result to read from there.</p>
+      </div>
+    )
+  if (!hits.length)
+    return (
+      <div className="mx-auto max-w-[420px] px-8 py-12">
+        <h3 className="mb-2 text-[31px] leading-[1.1] font-extrabold tracking-tight break-words">
+          No results for “{query.trim()}”
+        </h3>
+        <p className="text-muted-foreground">Try a different spelling or a shorter phrase.</p>
+      </div>
+    )
+  return (
+    <section className="pb-24">
+      <p className="border-b py-3 text-[13px] text-muted-foreground px-safe">
+        {total} {total === 1 ? 'result' : 'results'}
+        {total > hits.length && `, showing the first ${hits.length}`}
+      </p>
+      {hits.map(h => {
+        const from = Math.max(0, h.at - 80)
+        const to = Math.min(h.text.length, h.at + length + 140)
+        return (
+          <button
+            key={`${h.seg}-${h.at}`}
+            onClick={() => onOpen(h.seg)}
+            className="grid w-full gap-0.5 border-b py-3 text-left px-safe hover:bg-hover"
+          >
+            <span className="truncate text-[13px] text-muted-foreground">{chapters[h.ch]?.title}</span>
+            <span className="font-read text-[15px] leading-normal">
+              {from > 0 && '…'}
+              {h.text.slice(from, h.at)}
+              <mark className="rounded-[3px] bg-primary/20 px-0.5 font-bold text-inherit">
+                {h.text.slice(h.at, h.at + length)}
+              </mark>
+              {h.text.slice(h.at + length, to)}
+              {to < h.text.length && '…'}
+            </span>
+          </button>
+        )
+      })}
+    </section>
+  )
+}
+
+function NotesList({
+  notes,
+  posts,
+  author,
+  onOpen,
+  onEdit,
+}: {
+  notes: Note[]
+  posts: Post[]
+  author: Author
+  onOpen: (n: Note) => void
+  onEdit: (n: Note) => void
+}) {
+  if (!notes.length)
+    return (
+      <div className="mx-auto max-w-[420px] px-8 py-12">
+        <h3 className="mb-2 text-[31px] leading-[1.1] font-extrabold tracking-tight">Your notes live here</h3>
+        <p className="text-muted-foreground">
+          <span className="touch-only">Hold a sentence in any post and drag to select more, then save it as a quote. </span>
+          <span className="touch-hide">Select words in any post to save them as a quote. </span>
+          Tap reply on a post to write a note about it.
+        </p>
+      </div>
+    )
+  return (
+    <section className="pb-24">
+      {[...notes].reverse().map(n => {
+        const post = posts[postIndexOfSeg(posts, n.seg)]
+        const text = post ? plainText(post) : ''
+        return (
+          <PostShell
+            key={n.id}
+            author={{ title: 'You', handle: '@you' }}
+            avatar={<YouAvatar />}
+            time={ago(n.at)}
+          >
+            {n.text ? (
+              <button onClick={() => onEdit(n)} className="block w-full text-left" aria-label="Edit note">
+                <p className="mt-0.5 text-[15px] whitespace-pre-wrap break-words">{n.text}</p>
+              </button>
+            ) : (
+              <p className="mt-0.5 text-[15px] text-muted-foreground">Saved a quote</p>
+            )}
+            <button
+              onClick={() => onOpen(n)}
+              className="mt-3 mb-2 block w-full rounded-2xl border p-3 text-left hover:bg-hover"
+              aria-label="Read this passage in the book"
+            >
+              <span className="mb-1 flex min-w-0 items-center gap-1.5">
+                <BookAvatar title={author.title} avatar={author.avatar} className="size-5 text-[10px]" />
+                <b className="truncate text-[15px] font-bold">{author.title}</b>
+                <span className="shrink-0 text-muted-foreground">· {post ? `${post.pct}%` : ''}</span>
+              </span>
+              <span className="line-clamp-4 font-read text-[15px] leading-normal">
+                {n.quote ? <QuoteMark text={n.quote} /> : text}
+              </span>
+            </button>
+            <div className="mb-2 -ml-2 flex">
+              <button
+                onClick={() => onEdit(n)}
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-full px-2 text-[13px] font-bold text-muted-foreground hover:bg-primary/10 hover:text-primary"
+              >
+                {n.text ? <Pencil className="size-4" /> : <MessageSquarePlus className="size-4" />}
+                {n.text ? 'Edit note' : 'Add a note'}
+              </button>
+            </div>
+          </PostShell>
+        )
+      })}
+    </section>
   )
 }
 
@@ -377,7 +891,9 @@ function WelcomePost({ onOpen }: { onOpen: () => void }) {
       <div className="post-text">
         <p>
           Add any EPUB or PDF with the blue button, or drop the file anywhere on this page. Each chapter becomes a thread,
-          and your books, place, likes and bookmarks are kept on this device. Press j and k to move between posts.
+          and your books, place, likes and bookmarks are kept on this device.
+          <span className="touch-only"> Hold a sentence and drag to quote it.</span>
+          <span className="touch-hide"> Select words to quote them, and press j and k to move between posts.</span>
         </p>
         <p>Below is a sample: the first two chapters of Pride and Prejudice, which is in the public domain.</p>
       </div>

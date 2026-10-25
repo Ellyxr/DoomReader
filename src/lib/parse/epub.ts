@@ -1,8 +1,8 @@
 import JSZip from 'jszip'
 
-import type { Block, Chapter, ParsedBook } from '@/lib/types'
+import type { Block, BookImage, Chapter, ParsedBook } from '@/lib/types'
 import { esc, textOf, yieldToBrowser } from './html'
-import { thumbnailsFromBlob } from './images'
+import { fitImage, thumbnailsFromBlob } from './images'
 
 type Progress = (done: number, total: number) => void
 
@@ -61,13 +61,27 @@ const tidy = (h: string) =>
   h.replace(/\s+/g, ' ').replace(/ ?<br> ?/g, '<br>').replace(/^(<br>)+|(<br>)+$/g, '').trim()
 const hasText = (h: string) => textOf(h).trim().length > 0
 
-function extractChapter(src: string, tocTitle: string | undefined): Chapter | null {
+const XLINK = 'http://www.w3.org/1999/xlink'
+
+/** Zip paths of the pictures in or under `el`. Remote and data: URLs are ignored; only files in the book are used. */
+function imagesIn(el: Element, dir: string) {
+  const t = el.localName.toLowerCase()
+  const list = t === 'img' || t === 'image' ? [el] : [...els(el, 'img'), ...els(el, 'image')]
+  return list.flatMap(im => {
+    const src = im.getAttribute('src') || im.getAttributeNS(XLINK, 'href') || im.getAttribute('href') || ''
+    if (!src || /^[a-z][\w+.-]*:/i.test(src)) return []
+    return [{ path: resolve(dir, safeDec(src)), alt: (im.getAttribute('alt') ?? '').trim() }]
+  })
+}
+
+function extractChapter(src: string, dir: string, tocTitle: string | undefined, skipImg: string): Chapter | null {
   let doc = new DOMParser().parseFromString(src, 'application/xhtml+xml')
   if (doc.getElementsByTagName('parsererror').length) doc = new DOMParser().parseFromString(src, 'text/html')
   const body = doc.body || doc.getElementsByTagName('body')[0]
   if (!body) return null
   const all = (body.textContent ?? '').replace(/\s+/g, ' ').trim()
-  if (all.length < 40) return null
+  const pictures = imagesIn(body, dir).filter(i => i.path !== skipImg)
+  if (all.length < 40 && !pictures.length) return null
   let linkLen = 0
   body.querySelectorAll('a').forEach(a => {
     linkLen += (a.textContent ?? '').length
@@ -79,18 +93,28 @@ function extractChapter(src: string, tocTitle: string | undefined): Chapter | nu
     h = tidy(h)
     if (hasText(h)) blocks.push({ k, html: h })
   }
+  // `img` holds the zip path until parseEpub swaps it for the stored picture's key
+  const pushImages = (el: Element) => {
+    for (const { path, alt } of imagesIn(el, dir)) if (path !== skipImg) blocks.push({ k: 'i', html: esc(alt), img: path })
+  }
   const walk = (el: Element, inQuote: boolean) => {
     for (const c of Array.from(el.children)) {
       const t = c.localName.toLowerCase()
+      if (t === 'img' || t === 'image' || t === 'svg') pushImages(c)
       if (SKIP.has(t)) continue
       if (/^h[1-6]$/.test(t)) push('h', inline(c))
       else if (t === 'blockquote') {
         const before = blocks.length
         walk(c, true)
         if (blocks.length === before) push('q', inline(c))
-      } else if (BLOCK.has(t)) push(inQuote ? 'q' : 'p', inline(c))
-      else if (c.querySelector(NESTED)) walk(c, inQuote)
-      else push(inQuote ? 'q' : 'p', inline(c))
+      } else if (BLOCK.has(t)) {
+        push(inQuote ? 'q' : 'p', inline(c))
+        pushImages(c)
+      } else if (c.querySelector(NESTED)) walk(c, inQuote)
+      else {
+        push(inQuote ? 'q' : 'p', inline(c))
+        pushImages(c)
+      }
     }
   }
   walk(body, false)
@@ -157,6 +181,7 @@ export async function parseEpub(file: File, onProgress?: Progress): Promise<Pars
 
   let cover: string | null = null
   let avatar: string | null = null
+  let coverPath = ''
   try {
     let item = Object.values(manifest).find(m => /cover-image/.test(m.props))
     if (!item) {
@@ -164,6 +189,7 @@ export async function parseEpub(file: File, onProgress?: Progress): Promise<Pars
       if (meta) item = manifest[meta.getAttribute('content') ?? '']
     }
     if (item && /^image\//.test(item.type)) {
+      coverPath = resolve(base, safeDec(item.href))
       const f = getFile(resolve(base, item.href))
       if (f) {
         const blob = new Blob([await f.async('arraybuffer')], { type: item.type })
@@ -219,7 +245,7 @@ export async function parseEpub(file: File, onProgress?: Progress): Promise<Pars
     const path = resolve(base, it.href)
     const src = await read(path)
     if (!src) continue
-    const ch = extractChapter(src, toc[path])
+    const ch = extractChapter(src, dirOf(path), toc[path], coverPath)
     if (ch) {
       if (!ch.title) ch.title = 'Section ' + (chapters.length + 1)
       chapters.push(ch)
@@ -227,6 +253,69 @@ export async function parseEpub(file: File, onProgress?: Progress): Promise<Pars
     if (onProgress && i % 3 === 0) onProgress(i + 1, spine.length)
     if (i % 6 === 0) await yieldToBrowser()
   }
-  if (!chapters.length) throw new Error('No readable text found. DRM-protected books cannot be opened.')
-  return { title, author, cover, avatar, chapters }
+
+  const types: Record<string, string> = {}
+  for (const m of Object.values(manifest)) types[resolve(base, safeDec(m.href))] = m.type
+  const images = await loadImages(chapters, getFile, types)
+  const kept = chapters.filter(c => c.blocks.length)
+  if (!kept.length) throw new Error('No readable text found. DRM-protected books cannot be opened.')
+  return { title, author, cover, avatar, chapters: kept, images }
+}
+
+const IMAGE_TYPES: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  avif: 'image/avif',
+}
+const MAX_IMAGES = 600
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+/**
+ * Reads the pictures the image blocks point at, then swaps each block's zip path for a short key ("i0", "i1"…).
+ * Missing, unreadable, oversized and ornament-sized pictures are dropped along with their blocks.
+ */
+async function loadImages(
+  chapters: Chapter[],
+  getFile: (p: string) => JSZip.JSZipObject | null,
+  types: Record<string, string>,
+): Promise<Record<string, BookImage>> {
+  const images: Record<string, BookImage> = {}
+  const keys = new Map<string, string | null>()
+  for (const ch of chapters) {
+    const out: Block[] = []
+    for (const b of ch.blocks) {
+      if (b.k !== 'i') {
+        out.push(b)
+        continue
+      }
+      const path = b.img ?? ''
+      if (!keys.has(path)) {
+        keys.set(path, null)
+        const f = keys.size <= MAX_IMAGES ? getFile(path) : null
+        const ext = path.split('.').pop()?.toLowerCase() ?? ''
+        const type = /^image\//.test(types[path] ?? '') ? types[path] : IMAGE_TYPES[ext]
+        if (f && type) {
+          try {
+            const data = await f.async('arraybuffer')
+            const img = data.byteLength <= MAX_IMAGE_BYTES ? await fitImage(new Blob([data], { type })) : null
+            if (img) {
+              const key = 'i' + Object.keys(images).length
+              images[key] = img
+              keys.set(path, key)
+            }
+          } catch {
+            /* an unreadable picture is skipped */
+          }
+        }
+      }
+      const key = keys.get(path)
+      if (key) out.push({ ...b, img: key, w: images[key].w, h: images[key].h })
+    }
+    ch.blocks = out
+  }
+  return images
 }

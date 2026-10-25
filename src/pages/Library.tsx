@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Download, HardDrive, MoreHorizontal, Search, ShieldCheck, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Archive, Download, HardDrive, MoreHorizontal, Search, ShieldCheck, Trash2, Upload } from 'lucide-react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 
@@ -95,8 +95,95 @@ function BookRow({ book, onDelete }: { book: BookMeta; onDelete: (b: BookMeta) =
   )
 }
 
-function StorageFooter({ info, onPersist }: { info: StorageInfo | null; onPersist: () => void }) {
-  if (!info?.supported) return null
+/** Backing up and restoring the whole library as one file. The zip code loads only when it is used. */
+function useBackup() {
+  const input = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+
+  const backUp = async () => {
+    if (busy) return
+    setBusy(true)
+    const t = toast.loading('Preparing your backup…')
+    try {
+      const { createBackup, downloadBackup } = await import('@/lib/backup')
+      const { blob, count } = await createBackup((a, b) => toast.loading(`Preparing your backup (${a} of ${b})…`, { id: t }))
+      downloadBackup(blob)
+      toast.success(`Backed up ${count} ${count === 1 ? 'book' : 'books'}`, {
+        id: t,
+        description: 'Keep the file somewhere safe. Restore it here or on another device.',
+      })
+    } catch (e) {
+      console.error(e)
+      toast.error('Could not make the backup', { id: t, description: e instanceof Error ? e.message : undefined })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const restore = async (file: File) => {
+    setBusy(true)
+    const t = toast.loading(`Restoring ${file.name}…`)
+    try {
+      const { restoreBackup } = await import('@/lib/backup')
+      const { added, merged } = await restoreBackup(file, (a, b) => toast.loading(`Restoring (${a} of ${b})…`, { id: t }))
+      const parts = [added && `${added} added`, merged && `${merged} already here, notes and marks combined`].filter(Boolean)
+      toast.success('Backup restored', { id: t, description: parts.join(' · ') || 'Nothing new in that file.' })
+      void requestPersistence()
+    } catch (e) {
+      console.error(e)
+      toast.error(e instanceof Error ? e.message : 'Could not restore that file.', { id: t, description: file.name })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const field = (
+    <input
+      ref={input}
+      type="file"
+      accept=".zip,application/zip"
+      hidden
+      onChange={e => {
+        const f = e.target.files?.[0]
+        if (f) void restore(f)
+        e.target.value = ''
+      }}
+    />
+  )
+  return { busy, backUp, pickRestore: () => input.current?.click(), field }
+}
+
+function BackupCard({ busy, onBackUp, onRestore }: { busy: boolean; onBackUp: () => void; onRestore: () => void }) {
+  return (
+    <div className="rounded-2xl border p-3">
+      <p className="mb-2 text-foreground">
+        Your books live only in this browser. Download a backup to keep them safe, or to move your library, notes and
+        place to another device.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" className="rounded-full font-bold" onClick={onBackUp} disabled={busy}>
+          <Archive />
+          Back up library
+        </Button>
+        <Button size="sm" variant="outline" className="rounded-full font-bold" onClick={onRestore} disabled={busy}>
+          <Upload />
+          Restore
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function StorageFooter({
+  info,
+  onPersist,
+  backup,
+}: {
+  info: StorageInfo | null
+  onPersist: () => void
+  backup: React.ReactNode
+}) {
+  if (!info?.supported) return <div className="grid gap-3 px-safe py-6 text-[13px]">{backup}</div>
   return (
     <div className="grid gap-3 px-safe py-6 text-[13px] text-muted-foreground">
       <div className="flex items-center gap-2">
@@ -122,6 +209,7 @@ function StorageFooter({ info, onPersist }: { info: StorageInfo | null; onPersis
           </Button>
         </div>
       )}
+      {backup}
     </div>
   )
 }
@@ -133,6 +221,7 @@ export default function Library() {
   const [info, setInfo] = useState<StorageInfo | null>(null)
   const [query, setQuery] = useState('')
   const [toDelete, setToDelete] = useState<BookMeta | null>(null)
+  const backup = useBackup()
 
   const refresh = useCallback(() => {
     void listBooks().then(setBooks)
@@ -176,6 +265,24 @@ export default function Library() {
               Install
             </Button>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label="Library options"
+              className="grid size-[38px] shrink-0 place-items-center rounded-full hover:bg-accent"
+            >
+              <MoreHorizontal className="size-5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="rounded-xl shadow-pop">
+              <DropdownMenuItem onSelect={() => void backup.backUp()} disabled={backup.busy || !books?.length}>
+                <Archive />
+                Back up library
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={backup.pickRestore} disabled={backup.busy}>
+                <Upload />
+                Restore from backup
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <SettingsPopover />
         </div>
         {books && books.length > 3 && (
@@ -208,7 +315,12 @@ export default function Library() {
         {shown && books && books.length > 0 && !shown.length && (
           <p className="px-safe py-8 text-center text-muted-foreground">No books match "{query}".</p>
         )}
-        <StorageFooter info={info} onPersist={persist} />
+        <StorageFooter
+          info={info}
+          onPersist={persist}
+          backup={<BackupCard busy={backup.busy} onBackUp={() => void backup.backUp()} onRestore={backup.pickRestore} />}
+        />
+        {backup.field}
       </main>
 
       <AlertDialog open={!!toDelete} onOpenChange={o => !o && setToDelete(null)}>

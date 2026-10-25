@@ -1,7 +1,20 @@
-/** A paragraph (p), heading (h) or blockquote line (q). `html` only ever contains <em>, <strong> and <br>. */
+/**
+ * A paragraph (p), heading (h), blockquote line (q) or image (i). `html` only ever contains <em>, <strong> and <br>;
+ * for an image it holds the escaped alt text, and `img` names the picture in the book's image store.
+ */
 export interface Block {
-  k: 'p' | 'h' | 'q'
+  k: 'p' | 'h' | 'q' | 'i'
   html: string
+  img?: string
+  w?: number
+  h?: number
+}
+
+/** A picture from an EPUB, stored apart from the text so the library and feed load without it. */
+export interface BookImage {
+  blob: Blob
+  w: number
+  h: number
 }
 
 export interface Chapter {
@@ -18,6 +31,8 @@ export interface ParsedBook {
   /** Square crop for the post avatar, as a JPEG data URL. */
   avatar: string | null
   chapters: Chapter[]
+  /** Pictures referenced by image blocks, keyed by `Block.img`. */
+  images?: Record<string, BookImage>
 }
 
 export type BookFormat = 'epub' | 'pdf' | 'sample'
@@ -39,10 +54,21 @@ export interface BookMeta {
   progress: number
 }
 
-/** Where the reader is in a book, plus liked and bookmarked segments (stored by segment index). */
+/** A reply to a post. With `quote` it is a quote post: the highlighted words plus the reader's comment. */
+export interface Note {
+  id: string
+  /** First segment of the post it was written on, so it stays attached when the post length changes. */
+  seg: number
+  quote?: string
+  text: string
+  at: number
+}
+
+/** Where the reader is in a book, plus liked and bookmarked segments (stored by segment index) and notes. */
 export interface ReadingState {
   id: string
   seg: number
   likes: number[]
   marks: number[]
+  notes?: Note[]
 }

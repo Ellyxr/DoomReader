@@ -131,6 +131,11 @@ html[data-font='serif'] {
   }
 }
 
+/* the reader's search box has its own close button */
+input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}
+
 @utility px-safe {
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
@@ -143,6 +148,7 @@ html[data-font='serif'] {
   line-height: 1.5;
   overflow-wrap: break-word;
   margin-top: 2px;
+  -webkit-tap-highlight-color: transparent;
 }
 .post-text p {
   margin: 0 0 0.75em;
@@ -178,6 +184,48 @@ html[data-font='serif'] {
   margin: 0;
 }
 
+/* Saved quotes (hl) and the passage being selected (sel). No padding, so marking text never moves it. */
+.post-text mark {
+  color: inherit;
+  background: none;
+  border-radius: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.post-text mark.hl {
+  background: color-mix(in srgb, #ffd400 42%, transparent);
+  cursor: pointer;
+}
+.dark .post-text mark.hl {
+  background: color-mix(in srgb, #ffd400 30%, transparent);
+}
+.post-text mark.sel {
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+/* On touch screens post text is selected a sentence at a time (useSentenceSelect), not with the browser's handles. */
+html.touch-ui .post-text {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+html.touch-ui .touch-hide,
+html:not(.touch-ui) .touch-only {
+  display: none;
+}
+
+/* a post just opened from search or a note */
+@keyframes post-flash {
+  0%,
+  40% {
+    background-color: color-mix(in srgb, var(--primary) 14%, transparent);
+  }
+}
+.post-flash {
+  animation: post-flash 1.8s ease-out;
+}
+
 @keyframes like-pop {
   40% {
     transform: scale(1.3);
@@ -189,5 +237,9 @@ html[data-font='serif'] {
 @media (prefers-reduced-motion: reduce) {
   .like-pop {
     animation: none;
+  }
+  .post-flash {
+    animation-duration: 0.01s;
+    background-color: color-mix(in srgb, var(--primary) 8%, transparent);
   }
 }
