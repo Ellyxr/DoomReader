@@ -9,8 +9,10 @@ export interface BookColor {
   bg: string
   /** Background at the bottom, nearly black. */
   deep: string
-  /** Secondary text (the sentences either side, labels), still at least 4.5:1 against `bg`. */
+  /** Secondary text (labels), still at least 4.5:1 against `bg`. */
   dim: string
+  /** The sentences either side of the one being read: context, not content, so quieter; at least 3:1. */
+  faint: string
 }
 
 type RGB = [number, number, number]
@@ -60,11 +62,14 @@ function deepen(rgb: RGB): BookColor {
   let bg = toRgb([h, s, l])
   while (contrast(WHITE, bg) < 7 && l > 0) bg = toRgb([h, s, (l -= 0.02)])
   const deep = toRgb([h, s, l * 0.3])
-  // the faintest white that still reads at 4.5:1 on the lightest part of the background
-  let alpha = 0.6
+  // the faintest white that still reads at the given contrast on the lightest part of the background
   const over = (a: number): RGB => bg.map((c, i) => c + (WHITE[i] - c) * a) as RGB
-  while (contrast(over(alpha), bg) < 4.5 && alpha < 1) alpha += 0.05
-  return { bg: css(bg), deep: css(deep), dim: css(WHITE, alpha) }
+  const faintest = (min: number, from: number) => {
+    let a = from
+    while (contrast(over(a), bg) < min && a < 1) a += 0.02
+    return css(WHITE, Math.min(1, a))
+  }
+  return { bg: css(bg), deep: css(deep), dim: faintest(4.5, 0.6), faint: faintest(3, 0.3) }
 }
 
 /** The most vivid colour in an image: the hue with the most saturated, bright pixels, averaged. */

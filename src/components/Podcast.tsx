@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronDown, Pause, Play, SkipBack, SkipForward, Square } from 'lucide-react'
 
 import { BookAvatar } from '@/components/BookAvatar'
@@ -10,13 +10,16 @@ import { cn } from '@/lib/utils'
 
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
-/** The sentence `by` places from sentence `chunk` of post `post`, or '' past either end of the book. */
+/**
+ * The sentence `by` places from sentence `chunk` of post `post` (text '' past either end of the book), with a key that
+ * names that sentence wherever it is shown, so it keeps its element as it moves from next to current to previous.
+ */
 function sentenceAt(posts: Post[], post: number, chunk: number, by: number) {
   let p = post
   let c = chunk + by
   while (c < 0 && p > 0) c += speechChunks(posts[--p]).length
   while (p < posts.length && c >= speechChunks(posts[p]).length) c -= speechChunks(posts[p++]).length
-  return (c >= 0 && posts[p] && speechChunks(posts[p])[c]) || ''
+  return { key: `${p}:${c}`, text: (c >= 0 && posts[p] && speechChunks(posts[p])[c]) || '' }
 }
 
 /** Smaller type for longer sentences, so most fit without scrolling. */
@@ -27,6 +30,96 @@ function sizeFor(text: string) {
   if (n <= 200) return 'text-[26px] leading-[1.25]'
   if (n <= 320) return 'text-[22px] leading-[1.3]'
   return 'text-[19px] leading-[1.35]'
+}
+
+const EASE = 'cubic-bezier(0.2, 0.8, 0.2, 1)' // quick start, soft landing
+
+/**
+ * The sentence being read, large, between the ones before and after it, small and faint. Each sentence keeps its
+ * element as it moves from next to current to previous, and glides there: its new size and place are drawn at once,
+ * then it is shown at its old ones and transformed back (FLIP), so it grows into the reading spot and shrinks out of it
+ * without the text reflowing frame by frame. A sentence that just arrived fades up into place.
+ */
+function Lyrics({
+  posts,
+  post,
+  chunk,
+  faint,
+  onSkip,
+  onToggle,
+}: {
+  posts: Post[]
+  post: number
+  chunk: number
+  faint: string
+  onSkip: (by: number) => void
+  onToggle: () => void
+}) {
+  const lines = [-1, 0, 1].map(by => ({ by, ...sentenceAt(posts, post, chunk, by) })).filter(l => l.text)
+  const els = useRef(new Map<string, HTMLElement>())
+  const was = useRef(new Map<string, { x: number; y: number; size: number }>())
+  const keys = lines.map(l => l.key).join()
+
+  useLayoutEffect(() => {
+    const now = new Map<string, { x: number; y: number; size: number }>()
+    // offsets ignore transforms, so a skip in the middle of an animation still measures true places
+    for (const [k, el] of els.current)
+      now.set(k, { x: el.offsetLeft, y: el.offsetTop, size: parseFloat(getComputedStyle(el).fontSize) })
+    if (!reduceMotion())
+      for (const [k, el] of els.current) {
+        const a = was.current.get(k)
+        const b = now.get(k)!
+        if (!a) {
+          // waits for the sentence growing into place to clear the way
+          el.animate([{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], {
+            duration: 380,
+            delay: 220,
+            easing: EASE,
+            fill: 'backwards',
+          })
+          continue
+        }
+        const scale = a.size / b.size
+        const move = `translate(${a.x - b.x}px, ${a.y - b.y}px)`
+        if (Math.abs(a.y - b.y) < 1 && Math.abs(scale - 1) < 0.01) continue
+        if (scale < 1)
+          // becoming the sentence being read: grows from its small size into place
+          el.animate([{ transform: `${move} scale(${scale})` }, { transform: 'none' }], { duration: 520, easing: EASE })
+        // stepping aside: it has already re-wrapped small, so scaling it up would spill off the screen; it glides
+        // to its place and fades in there instead
+        else el.animate([{ transform: move, opacity: 0.2 }, { transform: 'none', opacity: 1 }], { duration: 520, easing: EASE })
+      }
+    was.current = now
+  }, [keys])
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col justify-center gap-6 overflow-hidden py-4">
+      {lines.map(({ key, text, by }) => {
+        const active = by === 0
+        return (
+          <button
+            key={key}
+            ref={el => {
+              els.current.set(key, el!)
+              return () => void els.current.delete(key)
+            }}
+            onClick={() => (active ? onToggle() : onSkip(by))}
+            aria-current={active || undefined}
+            title={active ? 'Play or pause' : by < 0 ? 'Go back to this sentence' : 'Skip to this sentence'}
+            className={cn(
+              'block w-full origin-top-left text-left font-read text-pretty transition-colors duration-500',
+              active
+                ? cn('max-h-[55dvh] overflow-y-auto font-bold text-white', sizeFor(text))
+                : 'line-clamp-2 text-[15px] leading-snug font-medium',
+            )}
+            style={active ? undefined : { color: faint }}
+          >
+            {text}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 /** Keeps the screen on while listening here, since some phones stop speaking once the screen locks. */
@@ -145,9 +238,6 @@ export function Podcast(props: Props) {
   if (!mounted) return null
   const { playing, posts, rate, chapter, onToggle, onSkip, onRate, onMinimize, onStop } = props
   const at = last.post
-  const prev = sentenceAt(posts, at, last.chunk, -1)
-  const current = sentenceAt(posts, at, last.chunk, 0)
-  const next = sentenceAt(posts, at, last.chunk, 1)
   const pct = posts[at]?.pct ?? 0
   const nextRate = RATES[(RATES.indexOf(rate as (typeof RATES)[number]) + 1) % RATES.length]
   const ghost = 'grid place-items-center rounded-full transition-colors hover:bg-white/10 active:bg-white/15'
@@ -183,35 +273,7 @@ export function Podcast(props: Props) {
           <span className="size-11 shrink-0" />
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col justify-center gap-5 overflow-hidden py-4">
-          <button
-            onClick={() => onSkip(-1)}
-            disabled={!prev}
-            aria-label="Previous sentence"
-            className="line-clamp-2 text-left font-read text-[17px] leading-snug transition-opacity disabled:opacity-0"
-            style={{ color: color.dim }}
-          >
-            {prev}
-          </button>
-          <p
-            key={`${at}:${last.chunk}`}
-            className={cn(
-              'max-h-[55dvh] overflow-y-auto font-read font-bold text-pretty duration-300 animate-in fade-in-0 slide-in-from-bottom-3 motion-reduce:animate-none',
-              sizeFor(current),
-            )}
-          >
-            {current}
-          </p>
-          <button
-            onClick={() => onSkip(1)}
-            disabled={!next}
-            aria-label="Next sentence"
-            className="line-clamp-3 text-left font-read text-[17px] leading-snug transition-opacity disabled:opacity-0"
-            style={{ color: color.dim }}
-          >
-            {next}
-          </button>
-        </div>
+        <Lyrics posts={posts} post={at} chunk={last.chunk} faint={color.faint} onSkip={onSkip} onToggle={onToggle} />
 
         <div className="shrink-0">
           <div className="mb-4 flex items-center gap-3">
