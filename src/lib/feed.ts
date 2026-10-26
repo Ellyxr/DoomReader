@@ -53,7 +53,8 @@ function balance(pieces: string[]) {
   })
 }
 
-function splitSentences(html: string) {
+/** Paragraph HTML cut into sentences, keeping "Mr." and initials with the words after them. */
+function cutSentences(html: string) {
   const re = /([.!?…]+)(["”’')\]]*)((?:<\/(?:em|strong)>)*)\s+/g
   const cuts: number[] = []
   let m: RegExpExecArray | null
@@ -75,9 +76,14 @@ function splitSentences(html: string) {
     last = c
   }
   sentences.push(html.slice(last).trim())
+  return sentences.filter(Boolean)
+}
+
+/** A long paragraph as slices of whole sentences, each up to about 300 characters. */
+function splitSentences(html: string) {
   const out: string[] = []
   let cur = ''
-  for (const s of sentences) {
+  for (const s of cutSentences(html)) {
     if (cur && textOf(cur + ' ' + s).length > 300) {
       out.push(cur)
       cur = s
@@ -218,15 +224,24 @@ export const plainText = (p: Post) =>
 
 export const postImages = (p: Post) => p.segs.filter(s => s.k === 'i')
 
+const chunkCache = new WeakMap<Post, string[]>()
+
 /**
- * What text-to-speech reads for a post, one utterance per segment. Segments are at most a few hundred characters,
- * which keeps clear of Chrome's habit of stalling on long utterances.
+ * What text-to-speech reads for a post, one utterance per sentence, so podcast mode can show each sentence as it is
+ * spoken. Short utterances also keep clear of Chrome's habit of stalling on long ones.
  */
-export const speechChunks = (p: Post) =>
-  p.segs
-    .filter(s => s.k !== 'i')
-    .map(s => textOf(s.html).trim())
-    .filter(Boolean)
+export function speechChunks(p: Post) {
+  let chunks = chunkCache.get(p)
+  if (!chunks) {
+    chunks = p.segs
+      .filter(s => s.k !== 'i')
+      .flatMap(s => (s.k === 't' || s.k === 'h' ? [s.html] : cutSentences(s.html)))
+      .map(h => textOf(h).trim())
+      .filter(Boolean)
+    chunkCache.set(p, chunks)
+  }
+  return chunks
+}
 
 export interface SearchHit {
   seg: number

@@ -17,13 +17,15 @@ function loadRate() {
 }
 
 /**
- * Reads the feed aloud with the browser's own voices (Web Speech API), post by post, calling `onPost` as each
- * post starts so the reader can scroll along. Pausing cancels and remembers the paragraph, because
- * `speechSynthesis.pause()` is unreliable on Android; resuming starts that paragraph again.
+ * Reads the feed aloud with the browser's own voices (Web Speech API), a sentence at a time, calling `onPost` as each
+ * post starts so the reader can scroll along. Pausing cancels and remembers the sentence, because
+ * `speechSynthesis.pause()` is unreliable on Android; resuming starts that sentence again.
  */
 export function useSpeech(posts: Post[], onPost: (i: number) => void, onFail: () => void) {
   const [playing, setPlaying] = useState(false)
   const [post, setPost] = useState<number | null>(null)
+  /** The sentence being read, as an index into `speechChunks(posts[post])`. */
+  const [chunk, setChunk] = useState(0)
   const [rate, setRateState] = useState(loadRate)
 
   const pos = useRef({ post: 0, chunk: 0 })
@@ -48,10 +50,9 @@ export function useSpeech(posts: Post[], onPost: (i: number) => void, onFail: ()
       }
       chunks = speechChunks(posts[pos.current.post])
     }
-    if (pos.current.chunk === 0) {
-      setPost(pos.current.post)
-      live.current.onPost(pos.current.post)
-    }
+    if (pos.current.chunk === 0) live.current.onPost(pos.current.post)
+    setPost(pos.current.post)
+    setChunk(pos.current.chunk)
 
     const u = new SpeechSynthesisUtterance(chunks[pos.current.chunk])
     u.rate = live.current.rate
@@ -97,6 +98,25 @@ export function useSpeech(posts: Post[], onPost: (i: number) => void, onFail: ()
     [speak, post],
   )
 
+  /** Moves `by` sentences back or forward, across posts; keeps reading if it was. */
+  const skip = useCallback(
+    (by: number) => {
+      const { posts } = live.current
+      let { post: p, chunk: c } = pos.current
+      c += by
+      while (c < 0 && p > 0) c += speechChunks(posts[--p]).length
+      while (p < posts.length && c >= speechChunks(posts[p]).length) c -= speechChunks(posts[p++]).length
+      if (p >= posts.length || c < 0) return
+      halt()
+      pos.current = { post: p, chunk: c }
+      if (p !== post) live.current.onPost(p)
+      setPost(p)
+      setChunk(c)
+      if (playing) speak()
+    },
+    [playing, post, speak],
+  )
+
   const pause = useCallback(() => {
     halt()
     setPlaying(false)
@@ -128,5 +148,5 @@ export function useSpeech(posts: Post[], onPost: (i: number) => void, onFail: ()
   // a new post length regroups the posts, so the remembered position no longer means anything
   useEffect(() => stop, [posts, stop])
 
-  return { playing, post, rate, play, pause, stop, setRate }
+  return { playing, post, chunk, rate, play, pause, stop, skip, setRate }
 }

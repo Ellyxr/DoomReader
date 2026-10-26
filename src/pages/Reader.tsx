@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import {
   ArrowLeft,
   ArrowDownUp,
+  ChevronUp,
   Copy,
   GripVertical,
   Headphones,
@@ -22,6 +23,7 @@ import { Fab } from '@/components/Fab'
 import { PinIcon } from '@/components/icons'
 import { useImporter } from '@/components/Importer'
 import { NoteComposer, type Draft } from '@/components/NoteComposer'
+import { Podcast } from '@/components/Podcast'
 import { ago, PostCard, PostShell, QuoteMark, YouAvatar, type Author, type PostAction } from '@/components/PostCard'
 import { SettingsPopover } from '@/components/SettingsPopover'
 import { Button } from '@/components/ui/button'
@@ -441,6 +443,29 @@ function Feed({
     },
     () => toast('Read aloud stopped', { description: 'This browser could not play its voice.' }),
   )
+  const chapterTitle = chapters[posts[speech.post ?? cur]?.ch ?? 0]?.title ?? ''
+  const toggleSpeech = () => (speech.playing ? speech.pause() : speech.play(speech.post ?? cur))
+
+  /* ---------- podcast mode: read-aloud full screen, minimized to the small player ---------- */
+  const [podcast, setPodcast] = useState(false)
+  const expandPodcast = () => {
+    toast.dismiss() // toasts float above everything, controls included
+    setPodcast(true)
+  }
+  const openPodcast = () => {
+    if (speech.post === null) speech.play(cur)
+    expandPodcast()
+  }
+  /** Stops, and slides back down to the feed at the post that was being read. */
+  const stopPodcast = () => {
+    const at = speech.post
+    speech.stop()
+    if (at === null) return
+    if (tab === 'feed') scrollToPost(at, false)
+    else jumpTo(at)
+  }
+  // reading ran off the end of the book, or stopped some other way
+  if (podcast && speech.post === null && !speech.playing) setPodcast(false)
 
   /* ---------- render ---------- */
   const current = posts[cur] ?? posts[0]
@@ -480,9 +505,9 @@ function Feed({
           </button>
           {speechSupported && (
             <button
-              aria-label={speech.playing ? 'Pause reading aloud' : 'Read aloud'}
-              title={speech.playing ? 'Pause reading aloud' : 'Read aloud'}
-              onClick={() => (speech.playing ? speech.pause() : speech.play(cur))}
+              aria-label="Read aloud in podcast mode"
+              title="Read aloud"
+              onClick={openPodcast}
               className="grid size-[38px] shrink-0 place-items-center rounded-full hover:bg-accent aria-pressed:text-primary"
               aria-pressed={speech.post !== null}
             >
@@ -599,16 +624,33 @@ function Feed({
         />
       )}
 
-      {speech.post !== null && !sel && (
+      {speech.post !== null && !sel && !podcast && (
         <Player
           playing={speech.playing}
           rate={speech.rate}
-          label={chapters[posts[speech.post]?.ch ?? 0]?.title ?? ''}
-          onToggle={() => (speech.playing ? speech.pause() : speech.play(speech.post ?? cur))}
+          label={chapterTitle}
+          onToggle={toggleSpeech}
           onStop={speech.stop}
           onRate={speech.setRate}
+          onExpand={expandPodcast}
         />
       )}
+
+      <Podcast
+        open={podcast}
+        playing={speech.playing}
+        post={speech.post}
+        chunk={speech.chunk}
+        posts={posts}
+        rate={speech.rate}
+        meta={meta}
+        chapter={chapterTitle}
+        onToggle={toggleSpeech}
+        onSkip={speech.skip}
+        onRate={speech.setRate}
+        onMinimize={() => setPodcast(false)}
+        onStop={stopPodcast}
+      />
 
       <WordTip word={word} speak={speechSupported && speech.post === null} onClose={clearWord} onQuote={quoteWord} />
 
@@ -700,6 +742,7 @@ function Player({
   onToggle,
   onStop,
   onRate,
+  onExpand,
 }: {
   playing: boolean
   rate: number
@@ -707,6 +750,8 @@ function Player({
   onToggle: () => void
   onStop: () => void
   onRate: (r: number) => void
+  /** Opens podcast mode. */
+  onExpand: () => void
 }) {
   const next = RATES[(RATES.indexOf(rate as (typeof RATES)[number]) + 1) % RATES.length]
   return (
@@ -727,10 +772,17 @@ function Player({
       >
         {playing ? <Pause className="size-5 fill-current" /> : <Play className="size-5 fill-current" />}
       </button>
-      <span className="min-w-0 flex-1 truncate px-2 text-[13px]">
-        <b className="block font-bold">{playing ? 'Reading aloud' : 'Paused'}</b>
-        <span className="text-muted-foreground">{label}</span>
-      </span>
+      <button
+        onClick={onExpand}
+        aria-label="Open podcast mode"
+        className="flex min-w-0 flex-1 items-center gap-1 self-stretch rounded-full px-2 text-left text-[13px] hover:bg-accent"
+      >
+        <span className="min-w-0 flex-1 truncate">
+          <b className="block font-bold">{playing ? 'Reading aloud' : 'Paused'}</b>
+          <span className="text-muted-foreground">{label}</span>
+        </span>
+        <ChevronUp className="size-5 shrink-0 text-muted-foreground" />
+      </button>
       <button
         onClick={() => onRate(next)}
         aria-label={`Speed ${rate}×, change to ${next}×`}
