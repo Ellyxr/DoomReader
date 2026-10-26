@@ -108,7 +108,14 @@ function cleanNotes(v: unknown): Note[] {
 function cleanState(id: string, v: unknown): ReadingState | undefined {
   if (!v) return undefined
   const o = obj(v)
-  return { id, seg: int(o.seg), likes: ints(o.likes), marks: ints(o.marks), notes: cleanNotes(o.notes) }
+  return {
+    id,
+    seg: int(o.seg),
+    likes: ints(o.likes),
+    marks: ints(o.marks),
+    notes: cleanNotes(o.notes),
+    ...(o.notesCustom === true ? { notesCustom: true } : {}),
+  }
 }
 
 function cleanMeta(id: string, v: unknown, chapters: Chapter[]): BookMeta {
@@ -131,7 +138,10 @@ function cleanMeta(id: string, v: unknown, chapters: Chapter[]): BookMeta {
   }
 }
 
-/** Joins two states for a book that is on both devices: this device keeps its place; marks and notes are combined. */
+/**
+ * Joins two states for a book that is on both devices: this device keeps its place; marks and notes are combined.
+ * Notes keep this device's order, with the other device's new ones after them (the reader re-sorts unless custom).
+ */
 function mergeState(here: ReadingState | undefined, there: ReadingState): ReadingState {
   if (!here) return there
   const notes = new Map((here.notes ?? []).map(n => [n.id, n]))
@@ -140,7 +150,7 @@ function mergeState(here: ReadingState | undefined, there: ReadingState): Readin
     ...here,
     likes: [...new Set([...here.likes, ...there.likes])],
     marks: [...new Set([...here.marks, ...there.marks])],
-    notes: [...notes.values()].sort((a, b) => a.at - b.at),
+    notes: [...notes.values()],
   }
 }
 

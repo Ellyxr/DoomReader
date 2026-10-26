@@ -70,5 +70,7 @@ export interface ReadingState {
   seg: number
   likes: number[]
   marks: number[]
+  /** In book order unless `notesCustom`, when the reader has dragged them into an order of their own. */
   notes?: Note[]
+  notesCustom?: boolean
 }

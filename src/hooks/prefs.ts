@@ -9,11 +9,13 @@ export interface Prefs {
   size: 's' | 'm' | 'l'
   font: 'sans' | 'serif'
   theme: Theme
+  /** Holding a word shows what it means. */
+  define: boolean
 }
 
 // Must match public/theme.js, which applies the theme before first paint.
 const KEY = 'doomreader:prefs'
-const DEFAULTS: Prefs = { len: 'm', size: 'm', font: 'sans', theme: 'system' }
+const DEFAULTS: Prefs = { len: 'm', size: 'm', font: 'sans', theme: 'system', define: false }
 
 function load(): Prefs {
   try {

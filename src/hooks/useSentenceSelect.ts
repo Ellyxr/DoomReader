@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { wordAt } from '@/lib/dictionary'
 import type { Post } from '@/lib/feed'
 import { domText, quoteOf, sentences, type PostText, type Range } from '@/lib/highlight'
 
@@ -16,6 +17,15 @@ export interface TextSelection {
   native: boolean
   /** The finger is still down. */
   dragging: boolean
+}
+
+/** A word held to look it up, as character offsets in its post. */
+export interface HeldWord {
+  post: number
+  s: number
+  a: number
+  b: number
+  word: string
 }
 
 const HOLD_MS = 420
@@ -97,12 +107,16 @@ const vibrate = (ms: number) => {
  * it's selected, tap another sentence in the post to extend to it. The browser's own long-press selection is turned
  * off in post text (see `html.touch-ui` in index.css), since it works word by word with fiddly handles.
  * With a mouse, ordinary text selection is used.
+ *
+ * With `define` on, holding still on a word picks that word instead (to show its meaning); dragging on from there turns
+ * it into a sentence selection as above. A mouse held still on a word does the same.
  */
-export function useSentenceSelect(posts: Post[]) {
+export function useSentenceSelect(posts: Post[], define: boolean) {
   const [sel, setSel] = useState<TextSelection | null>(null)
-  const live = useRef({ posts, sel })
+  const [word, setWord] = useState<HeldWord | null>(null)
+  const live = useRef({ posts, sel, word, define })
   useEffect(() => {
-    live.current = { posts, sel }
+    live.current = { posts, sel, word, define }
   })
 
   const clear = useCallback(() => {
@@ -117,7 +131,19 @@ export function useSentenceSelect(posts: Post[]) {
     let cache: Cache | null = null
     let pending: { x: number; y: number; el: HTMLElement; post: number; timer: number } | null = null
     let drag: { anchor: number; focus: number; x: number; y: number } | null = null
+    // where a hold picked a word: the finger may rest there without starting a selection
+    let look: { x: number; y: number } | null = null
     let frame = 0
+
+    /** Picks the word at character `i`, if there is one there. */
+    const pickWord = (c: Cache, i: number) => {
+      const r = wordAt(c.pt.text, i)
+      const post = live.current.posts[c.post]
+      if (!r || !post) return false
+      setSel(null)
+      setWord({ post: c.post, s: post.s, a: r[0], b: r[1], word: c.pt.text.slice(r[0], r[1]) })
+      return true
+    }
 
     const emit = (dragging: boolean) => {
       if (!cache || !drag) return
@@ -199,11 +225,13 @@ export function useSentenceSelect(posts: Post[]) {
         if (!pending) return
         cache = measure(pending.el, pending.post)
         if (!cache.units.length) return
-        const u = unitAt(cache.units, charAt(cache, pending.x, pending.y))
+        const at = charAt(cache, pending.x, pending.y)
+        const u = unitAt(cache.units, at)
         drag = { anchor: u, focus: u, x: pending.x, y: pending.y }
+        look = live.current.define && pickWord(cache, at) ? { x: pending.x, y: pending.y } : null
         pending = null
         vibrate(12)
-        emit(true)
+        if (!look) emit(true)
       }, HOLD_MS)
       pending = { x, y, ...hit, timer }
     }
@@ -218,6 +246,13 @@ export function useSentenceSelect(posts: Post[]) {
       if (e.cancelable) e.preventDefault() // the finger is selecting, not scrolling
       drag.x = t.clientX
       drag.y = t.clientY
+      if (look) {
+        if (Math.hypot(t.clientX - look.x, t.clientY - look.y) <= SLOP) return
+        // dragging away from a looked-up word selects sentences instead
+        look = null
+        setWord(null)
+        emit(true)
+      }
       follow()
       if (!frame) frame = requestAnimationFrame(edgeScroll)
     }
@@ -226,8 +261,9 @@ export function useSentenceSelect(posts: Post[]) {
       detach()
       if (drag) {
         e.preventDefault() // no click after a hold
-        emit(false)
+        if (!look) emit(false)
         drag = null
+        look = null
         return
       }
       if (!pending) return
@@ -264,17 +300,48 @@ export function useSentenceSelect(posts: Post[]) {
       detach()
       if (pending) clearTimeout(pending.timer)
       pending = null
-      if (drag) emit(false)
+      if (drag && !look) emit(false)
       drag = null
+      look = null
     }
 
     // the context menu a long press opens on Android would cover the selection
     const onMenu = (e: Event) => {
       if (root.classList.contains('touch-ui') && bodyAt(e.target)) e.preventDefault()
     }
-    // a mouse brings ordinary text selection back (laptops with touch screens)
+    // a mouse held still on a word looks it up; the click that ends the hold is swallowed, so it doesn't open a note
+    let mouse: { x: number; y: number; timer: number } | null = null
+    let swallowClick = false
+    const cancelMouse = () => {
+      if (mouse) clearTimeout(mouse.timer)
+      mouse = null
+    }
     const onPointer = (e: PointerEvent) => {
-      if (e.pointerType === 'mouse') root.classList.remove('touch-ui')
+      if (e.pointerType !== 'mouse') return
+      // a mouse brings ordinary text selection back (laptops with touch screens)
+      root.classList.remove('touch-ui')
+      cancelMouse()
+      swallowClick = false
+      const hit = e.button === 0 && live.current.define ? bodyAt(e.target) : null
+      if (!hit) return
+      const { clientX: x, clientY: y } = e
+      const timer = window.setTimeout(() => {
+        mouse = null
+        const s = getSelection()
+        if (s && !s.isCollapsed && s.toString().trim()) return // the mouse is selecting text
+        const c = measure(hit.el, hit.post)
+        if (pickWord(c, charAt(c, x, y))) swallowClick = true
+      }, HOLD_MS)
+      mouse = { x, y, timer }
+    }
+    const onPointerMove = (e: PointerEvent) => {
+      if (mouse && Math.hypot(e.clientX - mouse.x, e.clientY - mouse.y) > SLOP) cancelMouse()
+    }
+    const onClick = (e: MouseEvent) => {
+      if (!swallowClick) return
+      swallowClick = false
+      e.stopPropagation()
+      e.preventDefault()
     }
 
     // mouse selection: the browser draws it; this only reports what's selected
@@ -317,9 +384,13 @@ export function useSentenceSelect(posts: Post[]) {
     document.addEventListener('touchstart', onStart, { passive: true })
     document.addEventListener('contextmenu', onMenu)
     document.addEventListener('pointerdown', onPointer)
+    document.addEventListener('pointermove', onPointerMove, { passive: true })
+    document.addEventListener('pointerup', cancelMouse)
+    window.addEventListener('click', onClick, true)
     document.addEventListener('selectionchange', onSelection)
     return () => {
       if (pending) clearTimeout(pending.timer)
+      cancelMouse()
       cancelAnimationFrame(frame)
       clearTimeout(clearTimer)
       detach()
@@ -328,11 +399,31 @@ export function useSentenceSelect(posts: Post[]) {
       document.removeEventListener('touchstart', onStart)
       document.removeEventListener('contextmenu', onMenu)
       document.removeEventListener('pointerdown', onPointer)
+      document.removeEventListener('pointermove', onPointerMove)
+      document.removeEventListener('pointerup', cancelMouse)
+      window.removeEventListener('click', onClick, true)
       document.removeEventListener('selectionchange', onSelection)
     }
   }, [])
 
+  const clearWord = useCallback(() => setWord(null), [])
+
+  /** Turns the looked-up word into a selection of its sentence, ready to quote. */
+  const quoteWord = useCallback(() => {
+    const { word: w, posts } = live.current
+    setWord(null)
+    const el = w && document.querySelector<HTMLElement>(`main article[data-i="${w.post}"] .post-text`)
+    const post = w && posts[w.post]
+    if (!w || !el || !post) return
+    const c = measure(el, w.post)
+    const u = c.units[unitAt(c.units, w.a)]
+    if (!u) return
+    getSelection()?.removeAllRanges()
+    setSel({ post: w.post, s: post.s, ...u, quote: quoteOf(c.pt, u), count: 1, native: false, dragging: false })
+  }, [])
+
   // a selection in a post that was regrouped (new post length) no longer points at the same words
   const valid = sel && posts[sel.post]?.s === sel.s ? sel : null
-  return { sel: valid, clear }
+  const validWord = word && posts[word.post]?.s === word.s ? word : null
+  return { sel: valid, clear, word: validWord, clearWord, quoteWord }
 }

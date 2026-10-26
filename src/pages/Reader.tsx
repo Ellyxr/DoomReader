@@ -1,7 +1,9 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
+  ArrowDownUp,
   Copy,
+  GripVertical,
   Headphones,
   Highlighter,
   MessageSquarePlus,
@@ -23,10 +25,13 @@ import { NoteComposer, type Draft } from '@/components/NoteComposer'
 import { ago, PostCard, PostShell, QuoteMark, YouAvatar, type Author, type PostAction } from '@/components/PostCard'
 import { SettingsPopover } from '@/components/SettingsPopover'
 import { Button } from '@/components/ui/button'
+import { WordTip } from '@/components/WordTip'
 import { usePrefs } from '@/hooks/prefs'
+import { useReorder } from '@/hooks/useReorder'
 import { useSentenceSelect } from '@/hooks/useSentenceSelect'
 import { RATES, speechSupported, useSpeech } from '@/hooks/useSpeech'
 import { getBook, getState, markOpened, saveState } from '@/lib/db'
+import { downloadDictionary } from '@/lib/dictionary'
 import {
   buildPosts,
   buildSegments,
@@ -40,6 +45,7 @@ import {
   type Segment,
 } from '@/lib/feed'
 import { segOfQuote } from '@/lib/highlight'
+import { inBookOrder, insertByBook, moved, sortByBook } from '@/lib/notes'
 import type { BookMeta, Chapter, Note } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -50,7 +56,7 @@ const TABS: [Tab, string][] = [
   ['saved', 'Saved'],
   ['notes', 'Notes'],
 ]
-type Saved = { seg: number; likes: number[]; marks: number[]; notes?: Note[] }
+type Saved = { seg: number; likes: number[]; marks: number[]; notes?: Note[]; notesCustom?: boolean }
 
 const vibrateOnce = () => {
   try {
@@ -131,7 +137,11 @@ function Feed({
   const [tab, setTab] = useState<Tab>('feed')
   const [likes, setLikes] = useState(() => new Set(saved.likes))
   const [marks, setMarks] = useState(() => new Set(saved.marks))
-  const [notes, setNotes] = useState<Note[]>(() => saved.notes ?? [])
+  // notes saved before they could be reordered are in the order they were written; put those in book order
+  const [notes, setNotes] = useState<Note[]>(() =>
+    saved.notesCustom ? (saved.notes ?? []) : sortByBook(saved.notes ?? [], segs),
+  )
+  const notesCustom = useMemo(() => !inBookOrder(notes, segs), [notes, segs])
   const [draft, setDraft] = useState<Draft | null>(null)
   const [flash, setFlash] = useState<number | null>(null)
   const [query, setQuery] = useState('')
@@ -167,17 +177,21 @@ function Feed({
   const feedY = useRef(0)
 
   // latest values for callbacks that must stay stable (so memoized posts don't re-render)
-  const live = useRef({ posts, cur, likes, marks, notes, tab, meta })
+  const live = useRef({ posts, cur, likes, marks, notes, tab, meta, segs })
   useLayoutEffect(() => {
-    live.current = { posts, cur, likes, marks, notes, tab, meta }
+    live.current = { posts, cur, likes, marks, notes, tab, meta, segs }
   })
 
   /* ---------- saving ---------- */
   const persist = useCallback(() => {
-    const { posts, cur, likes, marks, notes, meta } = live.current
+    const { posts, cur, likes, marks, notes, meta, segs } = live.current
     const p = posts[cur]
     if (!p) return
-    void saveState({ id: meta.id, seg: p.s, likes: [...likes], marks: [...marks], notes }, p.pct)
+    const custom = !inBookOrder(notes, segs)
+    void saveState(
+      { id: meta.id, seg: p.s, likes: [...likes], marks: [...marks], notes, ...(custom ? { notesCustom: true } : {}) },
+      p.pct,
+    )
   }, [])
   const saveTimer = useRef(0)
   const saveSoon = useCallback(() => {
@@ -354,7 +368,8 @@ function Feed({
     if (note) setAndSaveNotes(notes.map(n => (n.id === note.id ? { ...n, text } : n)))
     else {
       const seg = quote ? segOfQuote(post, quote) : post.s
-      setAndSaveNotes([...notes, { id: newId(), seg, text, at: Date.now(), ...(quote ? { quote } : {}) }])
+      const added = { id: newId(), seg, text, at: Date.now(), ...(quote ? { quote } : {}) }
+      setAndSaveNotes(insertByBook(notes, added, segs))
       toast(quote ? 'Quote saved to Notes' : 'Reply saved to Notes')
     }
     setDraft(null)
@@ -362,12 +377,21 @@ function Feed({
   const deleteDraft = () => {
     if (!draft?.note) return
     const gone = draft.note
+    const was = notes.findIndex(n => n.id === gone.id)
     setAndSaveNotes(notes.filter(n => n.id !== gone.id))
     setDraft(null)
     toast('Note deleted', {
-      action: { label: 'Undo', onClick: () => setAndSaveNotes([...live.current.notes, gone].sort((a, b) => a.at - b.at)) },
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          const rest = live.current.notes
+          setAndSaveNotes([...rest.slice(0, was), gone, ...rest.slice(was)])
+        },
+      },
     })
   }
+  const moveNote = (from: number, to: number) => setAndSaveNotes(moved(notes, from, to))
+  const sortNotes = () => setAndSaveNotes(sortByBook(notes, segs))
   const editNote = useCallback((n: Note) => {
     const { posts } = live.current
     const post = posts[postIndexOfSeg(posts, n.seg)]
@@ -375,13 +399,21 @@ function Feed({
   }, [])
 
   /* ---------- selecting passages ---------- */
-  const { sel, clear: clearSel } = useSentenceSelect(posts)
+  const { sel, clear: clearSel, word, clearWord, quoteWord } = useSentenceSelect(posts, prefs.define)
+  // the selection being made, or else the word being looked up, is drawn in its post
+  const marked = sel && !sel.native ? sel : word
+  useEffect(() => {
+    if (prefs.define) void downloadDictionary()
+    else clearWord()
+  }, [prefs.define, clearWord])
+  useEffect(() => clearWord(), [tab, clearWord])
+
   /** Saves the selection as a quote straight away; a note can be added from the toast, or later by tapping it. */
   const saveQuote = () => {
     if (!sel) return
     const post = posts[sel.post]
     const note: Note = { id: newId(), seg: segOfQuote(post, sel.quote), quote: sel.quote, text: '', at: Date.now() }
-    setAndSaveNotes([...notes, note])
+    setAndSaveNotes(insertByBook(notes, note, segs))
     clearSel()
     vibrateOnce()
     toast('Quote saved', {
@@ -504,8 +536,8 @@ function Feed({
                 notes={notesByPost.get(p.i)}
                 speaking={speech.post === p.i}
                 flash={flash === p.i}
-                selA={sel && !sel.native && sel.post === p.i ? sel.a : undefined}
-                selB={sel && !sel.native && sel.post === p.i ? sel.b : undefined}
+                selA={marked?.post === p.i ? marked.a : undefined}
+                selB={marked?.post === p.i ? marked.b : undefined}
                 onAction={onAction}
                 onNote={editNote}
               />
@@ -529,10 +561,13 @@ function Feed({
         {tab === 'notes' && (
           <NotesList
             notes={notes}
+            custom={notesCustom}
             posts={posts}
             author={author}
             onOpen={n => jumpTo(postIndexOfSeg(posts, n.seg), true)}
             onEdit={editNote}
+            onMove={moveNote}
+            onSort={sortNotes}
           />
         )}
 
@@ -574,6 +609,8 @@ function Feed({
           onRate={speech.setRate}
         />
       )}
+
+      <WordTip word={word} speak={speechSupported && speech.post === null} onClose={clearWord} onQuote={quoteWord} />
 
       <NoteComposer
         draft={draft}
@@ -799,19 +836,31 @@ function SearchResults({
   )
 }
 
+/**
+ * Notes in book order, or in the reader's own order once they drag one by its handle. The handle is the only part that
+ * grabs, so the rest of each note still scrolls the list and opens as before.
+ */
 function NotesList({
   notes,
+  custom,
   posts,
   author,
   onOpen,
   onEdit,
+  onMove,
+  onSort,
 }: {
   notes: Note[]
+  /** Not in book order. */
+  custom: boolean
   posts: Post[]
   author: Author
   onOpen: (n: Note) => void
   onEdit: (n: Note) => void
+  onMove: (from: number, to: number) => void
+  onSort: () => void
 }) {
+  const { listRef, handle, style, dragging } = useReorder<HTMLDivElement>(onMove)
   if (!notes.length)
     return (
       <div className="mx-auto max-w-[420px] px-8 py-12">
@@ -825,7 +874,22 @@ function NotesList({
     )
   return (
     <section className="pb-24">
-      {[...notes].reverse().map(n => {
+      <div className="flex min-h-11 items-center gap-2 border-b py-1 px-safe text-[13px] text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate">
+          {notes.length} {notes.length === 1 ? 'note' : 'notes'} · {custom ? 'your order' : 'in book order'}
+        </span>
+        {custom && (
+          <button
+            onClick={onSort}
+            className="-mr-2 inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-bold text-primary hover:bg-primary/10"
+          >
+            <ArrowDownUp className="size-4" />
+            Sort by book order
+          </button>
+        )}
+      </div>
+      <div ref={listRef}>
+      {notes.map((n, i) => {
         const post = posts[postIndexOfSeg(posts, n.seg)]
         const text = post ? plainText(post) : ''
         return (
@@ -834,6 +898,20 @@ function NotesList({
             author={{ title: 'You', handle: '@you' }}
             avatar={<YouAvatar />}
             time={ago(n.at)}
+            style={style(i)}
+            className={cn(dragging === i && 'bg-background shadow-pop hover:bg-background')}
+            aside={
+              notes.length > 1 && (
+                <button
+                  {...handle(i, notes.length)}
+                  aria-label="Move note. Drag, or use the arrow keys."
+                  title="Drag to reorder"
+                  className="grid size-10 cursor-grab place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground active:cursor-grabbing"
+                >
+                  <GripVertical className="size-5" />
+                </button>
+              )
+            }
           >
             {n.text ? (
               <button onClick={() => onEdit(n)} className="block w-full text-left" aria-label="Edit note">
@@ -868,6 +946,7 @@ function NotesList({
           </PostShell>
         )
       })}
+      </div>
     </section>
   )
 }

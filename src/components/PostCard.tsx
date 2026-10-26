@@ -93,6 +93,7 @@ export function PostShell({
   context,
   threadUp,
   threadDown,
+  aside,
   children,
   className,
   ...rest
@@ -103,6 +104,8 @@ export function PostShell({
   context?: ReactNode
   threadUp?: boolean
   threadDown?: boolean
+  /** A control at the end of the name line, such as a drag handle. */
+  aside?: ReactNode
   children: ReactNode
 } & React.ComponentProps<'article'>) {
   return (
@@ -131,6 +134,7 @@ export function PostShell({
               <time className="flex-none text-muted-foreground">{time}</time>
             </>
           )}
+          {aside && <span className="-my-2.5 -mr-2 ml-auto flex-none">{aside}</span>}
         </div>
         {children}
       </div>

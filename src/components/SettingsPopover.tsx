@@ -1,10 +1,13 @@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { setPref, usePrefs, type Prefs } from '@/hooks/prefs'
+import { downloadDictionary, useDictStatus } from '@/lib/dictionary'
 
-type Option<K extends keyof Prefs> = [Prefs[K], string]
+type Choice = Exclude<keyof Prefs, 'define'>
+type Option<K extends Choice> = [Prefs[K], string]
 
-const SECTIONS: { [K in keyof Prefs]: { title: string; options: Option<K>[] } } = {
+const SECTIONS: { [K in Choice]: { title: string; options: Option<K>[] } } = {
   theme: {
     title: 'Appearance',
     options: [
@@ -38,7 +41,7 @@ const SECTIONS: { [K in keyof Prefs]: { title: string; options: Option<K>[] } } 
   },
 }
 
-function Segmented<K extends keyof Prefs>({ k }: { k: K }) {
+function Segmented<K extends Choice>({ k }: { k: K }) {
   const prefs = usePrefs()
   const { title, options } = SECTIONS[k]
   return (
@@ -65,6 +68,35 @@ function Segmented<K extends keyof Prefs>({ k }: { k: K }) {
   )
 }
 
+/** The switch for looking words up, with how the offline dictionary's download is going. */
+function DefineSwitch() {
+  const { define } = usePrefs()
+  const dict = useDictStatus()
+  const note =
+    dict.state === 'loading'
+      ? `Downloading dictionary… ${dict.done}%`
+      : dict.state === 'error'
+        ? "Couldn't download the dictionary. Words you look up while online still work."
+        : dict.state === 'ready'
+          ? 'English only. Saved on this device, so it works offline.'
+          : 'English only.'
+  return (
+    <div>
+      <label className="flex cursor-pointer items-center justify-between gap-3">
+        <span className="text-[15px] leading-5">Hold a word to see its meaning</span>
+        <Switch
+          checked={define}
+          onCheckedChange={on => {
+            setPref('define', on)
+            if (on) void downloadDictionary()
+          }}
+        />
+      </label>
+      {define && <p className="mt-1 text-[13px] leading-4 text-muted-foreground">{note}</p>}
+    </div>
+  )
+}
+
 /** The "Aa" button. The library shows only the theme; the reader shows everything. */
 export function SettingsPopover({ reader = false }: { reader?: boolean }) {
   return (
@@ -86,6 +118,7 @@ export function SettingsPopover({ reader = false }: { reader?: boolean }) {
             <Segmented k="len" />
             <Segmented k="size" />
             <Segmented k="font" />
+            <DefineSwitch />
           </>
         )}
       </PopoverContent>

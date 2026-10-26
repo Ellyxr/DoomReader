@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# built from WordNet by scripts/build-dict.mjs
+public/dict
