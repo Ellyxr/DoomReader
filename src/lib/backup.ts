@@ -1,8 +1,9 @@
 import JSZip from 'jszip'
 
 import { addBook, exportBook, getState, hasBook, listBooks, putState } from '@/lib/db'
+import { cleanState, int, mergeState, num, obj, str } from '@/lib/clean'
 import { safeInline } from '@/lib/parse/html'
-import type { Block, BookFormat, BookImage, BookMeta, Chapter, Note, ReadingState } from '@/lib/types'
+import type { Block, BookFormat, BookImage, BookMeta, Chapter, ReadingState } from '@/lib/types'
 
 /**
  * A backup is a zip: `doomreader-backup.json` holds every book's text, place, likes, bookmarks and notes, and
@@ -62,11 +63,6 @@ export function downloadBackup(blob: Blob) {
 
 /* ---------- validation ---------- */
 
-const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {})
-const str = (v: unknown, max = 2000) => (typeof v === 'string' ? v.slice(0, max) : '')
-const num = (v: unknown, d = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
-const int = (v: unknown) => Math.max(0, Math.floor(num(v)))
-const ints = (v: unknown) => (Array.isArray(v) ? v.filter(n => Number.isInteger(n) && n >= 0) : []) as number[]
 const dataImage = (v: unknown) =>
   typeof v === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(v) ? v : null
 const FORMATS = new Set<BookFormat>(['epub', 'pdf', 'sample'])
@@ -92,32 +88,6 @@ function cleanChapters(v: unknown, images: Set<string>): Chapter[] {
     .filter(c => c.blocks.length)
 }
 
-function cleanNotes(v: unknown): Note[] {
-  if (!Array.isArray(v)) return []
-  return v.flatMap(n => {
-    const o = obj(n)
-    const id = str(o.id, 64)
-    const text = str(o.text, 10_000)
-    const quote = str(o.quote, 5000)
-    // a quote may have no comment; a reply must have one
-    if (!id || (!text && !quote)) return []
-    return [{ id, seg: int(o.seg), text, at: num(o.at, Date.now()), ...(quote ? { quote } : {}) }]
-  })
-}
-
-function cleanState(id: string, v: unknown): ReadingState | undefined {
-  if (!v) return undefined
-  const o = obj(v)
-  return {
-    id,
-    seg: int(o.seg),
-    likes: ints(o.likes),
-    marks: ints(o.marks),
-    notes: cleanNotes(o.notes),
-    ...(o.notesCustom === true ? { notesCustom: true } : {}),
-  }
-}
-
 function cleanMeta(id: string, v: unknown, chapters: Chapter[]): BookMeta {
   const o = obj(v)
   const format = FORMATS.has(o.format as BookFormat) ? (o.format as BookFormat) : 'epub'
@@ -135,22 +105,6 @@ function cleanMeta(id: string, v: unknown, chapters: Chapter[]): BookMeta {
     addedAt: num(o.addedAt, Date.now()),
     openedAt: openedAt < 0 ? null : openedAt,
     progress: Math.min(100, int(o.progress)),
-  }
-}
-
-/**
- * Joins two states for a book that is on both devices: this device keeps its place; marks and notes are combined.
- * Notes keep this device's order, with the other device's new ones after them (the reader re-sorts unless custom).
- */
-function mergeState(here: ReadingState | undefined, there: ReadingState): ReadingState {
-  if (!here) return there
-  const notes = new Map((here.notes ?? []).map(n => [n.id, n]))
-  for (const n of there.notes ?? []) if (!notes.has(n.id)) notes.set(n.id, n)
-  return {
-    ...here,
-    likes: [...new Set([...here.likes, ...there.likes])],
-    marks: [...new Set([...here.marks, ...there.marks])],
-    notes: [...notes.values()],
   }
 }
 

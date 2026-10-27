@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Download, HardDrive, MoreHorizontal, Search, ShieldCheck, Trash2, Upload } from 'lucide-react'
+import { Archive, Download, HardDrive, MoreHorizontal, Search, ShieldCheck, Smartphone, Trash2, Upload } from 'lucide-react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 
 import { Fab } from '@/components/Fab'
 import { useImporter } from '@/components/Importer'
 import { SettingsPopover } from '@/components/SettingsPopover'
+import { SyncDialog } from '@/components/SyncDialog'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,8 +21,9 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { useInstallPrompt } from '@/hooks/useInstallPrompt'
-import { deleteBook, listBooks, onLibraryChange, requestPersistence, storageInfo, type StorageInfo } from '@/lib/db'
+import { deleteBook, getState, listBooks, onLibraryChange, requestPersistence, storageInfo, type StorageInfo } from '@/lib/db'
 import { hash } from '@/lib/parse/html'
+import type { SyncPayload } from '@/lib/sync'
 import type { BookMeta } from '@/lib/types'
 
 const FORMAT = { epub: 'EPUB', pdf: 'PDF', sample: 'Sample' } as const
@@ -57,7 +59,15 @@ function Cover({ book }: { book: BookMeta }) {
   )
 }
 
-function BookRow({ book, onDelete }: { book: BookMeta; onDelete: (b: BookMeta) => void }) {
+function BookRow({
+  book,
+  onDelete,
+  onSync,
+}: {
+  book: BookMeta
+  onDelete: (b: BookMeta) => void
+  onSync: (b: BookMeta) => void
+}) {
   return (
     <div className="relative flex gap-3 border-b py-3 px-safe hover:bg-hover">
       <Cover book={book} />
@@ -85,6 +95,12 @@ function BookRow({ book, onDelete }: { book: BookMeta; onDelete: (b: BookMeta) =
           <MoreHorizontal className="size-[18px]" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="rounded-xl shadow-pop">
+          {book.openedAt && (
+            <DropdownMenuItem onSelect={() => onSync(book)}>
+              <Smartphone />
+              Continue on another device
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem variant="destructive" onSelect={() => onDelete(book)}>
             <Trash2 />
             Delete from library
@@ -221,6 +237,11 @@ export default function Library() {
   const [info, setInfo] = useState<StorageInfo | null>(null)
   const [query, setQuery] = useState('')
   const [toDelete, setToDelete] = useState<BookMeta | null>(null)
+  const [syncing, setSyncing] = useState<SyncPayload | null>(null)
+  const openSync = async (b: BookMeta) => {
+    const state = (await getState(b.id)) ?? { id: b.id, seg: 0, likes: [], marks: [] }
+    setSyncing({ id: b.id, title: b.title, pct: b.progress, state })
+  }
   const backup = useBackup()
 
   const refresh = useCallback(() => {
@@ -311,7 +332,7 @@ export default function Library() {
             </Button>
           </div>
         )}
-        {shown?.map(b => <BookRow key={b.id} book={b} onDelete={setToDelete} />)}
+        {shown?.map(b => <BookRow key={b.id} book={b} onDelete={setToDelete} onSync={b => void openSync(b)} />)}
         {shown && books && books.length > 0 && !shown.length && (
           <p className="px-safe py-8 text-center text-muted-foreground">No books match "{query}".</p>
         )}
@@ -347,6 +368,7 @@ export default function Library() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <SyncDialog payload={syncing} onClose={() => setSyncing(null)} />
       <Fab />
     </div>
   )

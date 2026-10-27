@@ -7,6 +7,7 @@ import { useTabIdentity } from '@/hooks/useTabIdentity'
 import Library from '@/pages/Library'
 
 const Reader = lazy(() => import('@/pages/Reader'))
+const Sync = lazy(() => import('@/pages/Sync'))
 
 function Layout() {
   useTabIdentity()
@@ -28,6 +29,7 @@ const router = createHashRouter([
     children: [
       { path: '/', element: <Library /> },
       { path: '/read/:id', element: <Reader /> },
+      { path: '/sync/:code', element: <Sync /> },
       { path: '*', element: <Library /> },
     ],
   },

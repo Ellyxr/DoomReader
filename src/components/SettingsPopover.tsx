@@ -1,3 +1,6 @@
+import { Smartphone } from 'lucide-react'
+import { Popover as PopoverPrimitive } from 'radix-ui'
+
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -145,10 +148,13 @@ export function SettingsPopover({
   reader = false,
   autoScroll,
   onAutoScroll,
+  onSync,
 }: {
   reader?: boolean
   autoScroll?: AutoScroll
   onAutoScroll?: (v: AutoScroll) => void
+  /** Opens "Continue on another device". */
+  onSync?: () => void
 }) {
   return (
     <Popover>
@@ -173,6 +179,15 @@ export function SettingsPopover({
               <Pills title="Auto-scroll" options={AUTO_SCROLL} value={autoScroll} onChange={onAutoScroll} />
             )}
             <DefineSwitch />
+            {onSync && (
+              <PopoverPrimitive.Close
+                onClick={onSync}
+                className="-mx-1.5 -mb-1.5 flex items-center gap-2.5 rounded-xl px-1.5 py-2 text-left text-[15px] hover:bg-accent"
+              >
+                <Smartphone className="size-[18px] shrink-0" />
+                Continue on another device
+              </PopoverPrimitive.Close>
+            )}
           </>
         ) : (
           <TabBookSwitch />

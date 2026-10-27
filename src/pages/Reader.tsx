@@ -26,6 +26,7 @@ import { NoteComposer, type Draft } from '@/components/NoteComposer'
 import { Podcast } from '@/components/Podcast'
 import { ago, PostCard, PostShell, QuoteMark, YouAvatar, type Author, type PostAction } from '@/components/PostCard'
 import { SettingsPopover } from '@/components/SettingsPopover'
+import { SyncDialog } from '@/components/SyncDialog'
 import { Button } from '@/components/ui/button'
 import { WordTip } from '@/components/WordTip'
 import { usePrefs } from '@/hooks/prefs'
@@ -49,6 +50,7 @@ import {
 } from '@/lib/feed'
 import { segOfQuote } from '@/lib/highlight'
 import { inBookOrder, insertByBook, moved, sortByBook } from '@/lib/notes'
+import { takePendingSync, type SyncPayload } from '@/lib/sync'
 import type { BookMeta, Chapter, Note } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -91,10 +93,13 @@ export default function Reader() {
 
   useEffect(() => {
     let live = true
-    void Promise.all([getBook(id), getState(id)]).then(([b, s]) => {
+    // a sync link opened before this book was added takes effect now
+    const synced = takePendingSync(id).catch(() => null)
+    void Promise.all([getBook(id), synced.then(() => getState(id)), synced]).then(([b, s, p]) => {
       if (!live) return
       setLoaded({ id, book: b, saved: s ?? { seg: 0, likes: [], marks: [] } })
       if (b) void markOpened(id)
+      if (b && p) toast(`Picked up at ${p.pct}%`, { description: 'From your other device.' })
     })
     return () => {
       live = false
@@ -481,6 +486,22 @@ function Feed({
     },
   })
 
+  /* ---------- continue on another device ---------- */
+  const [syncing, setSyncing] = useState<SyncPayload | null>(null)
+  const openSync = () => {
+    persist()
+    const { posts, cur, likes, marks, notes, meta, segs } = live.current
+    const p = posts[cur]
+    if (!p) return
+    const custom = !inBookOrder(notes, segs)
+    setSyncing({
+      id: meta.id,
+      title: meta.title,
+      pct: p.pct,
+      state: { id: meta.id, seg: p.s, likes: [...likes], marks: [...marks], notes, ...(custom ? { notesCustom: true } : {}) },
+    })
+  }
+
   /* ---------- render ---------- */
   const current = posts[cur] ?? posts[0]
   const pct = atEnd && rendered >= posts.length ? 100 : (current?.pct ?? 0)
@@ -528,7 +549,7 @@ function Feed({
               <Headphones className="size-5" />
             </button>
           )}
-          <SettingsPopover reader autoScroll={autoScroll} onAutoScroll={setAutoScroll} />
+          <SettingsPopover reader autoScroll={autoScroll} onAutoScroll={setAutoScroll} onSync={openSync} />
         </div>
         {tab === 'search' ? (
           <SearchBox query={query} onQuery={setQuery} onClose={() => switchTab('feed')} />
@@ -653,6 +674,8 @@ function Feed({
           onExpand={expandPodcast}
         />
       )}
+
+      <SyncDialog payload={syncing} onClose={() => setSyncing(null)} />
 
       <Podcast
         open={podcast}
