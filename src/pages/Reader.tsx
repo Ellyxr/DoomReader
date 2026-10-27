@@ -503,6 +503,8 @@ function Feed({
   }
 
   /* ---------- render ---------- */
+  const autoBar = autoScroll !== 'off' && tab === 'feed' && speech.post === null && !sel
+  const playerBar = speech.post !== null && !sel && !podcast
   const current = posts[cur] ?? posts[0]
   const pct = atEnd && rendered >= posts.length ? 100 : (current?.pct ?? 0)
   const isSample = meta.format === 'sample'
@@ -659,11 +661,11 @@ function Feed({
         />
       )}
 
-      {autoScroll !== 'off' && tab === 'feed' && speech.post === null && !sel && (
+      {autoBar && (
         <AutoScrollBar mode={autoScroll} onMode={setAutoScroll} />
       )}
 
-      {speech.post !== null && !sel && !podcast && (
+      {playerBar && (
         <Player
           playing={speech.playing}
           rate={speech.rate}
@@ -703,7 +705,8 @@ function Feed({
         onDelete={deleteDraft}
       />
 
-      <Fab />
+      {/* the player bars sit where the scanner button goes */}
+      <Fab scan={!autoBar && !playerBar} />
     </div>
   )
 }

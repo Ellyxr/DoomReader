@@ -63,6 +63,14 @@ export function syncLink(code: string) {
   return `${location.origin}${location.pathname}#/sync/${code}`
 }
 
+/**
+ * The code inside a sync link (from a QR code or pasted), or null for anything else. Only the code is kept: the app
+ * moves to its own sync page and never opens a link it was handed.
+ */
+export function syncCodeFrom(text: string) {
+  return /#\/sync\/([zj][\w-]+)\s*$/.exec(text.trim())?.[1] ?? null
+}
+
 /** Reads a link's code back, treating it as untrusted. Returns null for anything that isn't a valid sync link. */
 export async function decodeSync(code: string): Promise<SyncPayload | null> {
   try {
