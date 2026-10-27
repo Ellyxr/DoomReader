@@ -51,6 +51,18 @@ export default defineConfig({
         // the pdf.js worker is ~1 MB; precache it so PDFs import offline
         globPatterns: ['**/*.{js,mjs,css,html,svg,png,ico,webmanifest}'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // shortcut favicons, so the buttons keep their faces offline
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.origin === 'https://icons.duckduckgo.com',
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'shortcut-icons',
+              expiration: { maxEntries: 20, maxAgeSeconds: 30 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
       },
     }),
   ],

@@ -705,8 +705,8 @@ function Feed({
         onDelete={deleteDraft}
       />
 
-      {/* the player bars sit where the scanner button goes */}
-      <Fab scan={!autoBar && !playerBar} />
+      {/* the player bars sit where the scanner and shortcut buttons go */}
+      <Fab extras={!autoBar && !playerBar} />
     </div>
   )
 }
