@@ -7,7 +7,8 @@ export type Theme = 'light' | 'dark' | 'system'
 export interface Prefs {
   len: PostLength
   size: 's' | 'm' | 'l'
-  font: 'sans' | 'serif'
+  /** 'custom' is a font the reader uploaded (lib/fonts). */
+  font: 'sans' | 'serif' | 'custom'
   theme: Theme
   /** Holding a word shows what it means. */
   define: boolean

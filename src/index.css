@@ -75,6 +75,10 @@ html[data-size='l'] {
 html[data-font='serif'] {
   --font-read: Charter, 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
 }
+/* uploaded by the reader (lib/fonts); the system font stands in until it loads, or if it was removed */
+html[data-font='custom'] {
+  --font-read: 'DoomReader Custom', var(--font-ui);
+}
 
 @theme inline {
   --font-sans: var(--font-ui);
@@ -234,7 +238,21 @@ html:not(.touch-ui) .touch-only {
 .like-pop {
   animation: like-pop 0.3s ease;
 }
+/* podcast mode, word by word: each word lands as it is spoken */
+@keyframes word-pop {
+  from {
+    opacity: 0;
+    transform: translateY(0.18em) scale(0.9);
+  }
+}
+.word-pop {
+  animation: word-pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .word-pop {
+    animation: none;
+  }
   .like-pop {
     animation: none;
   }

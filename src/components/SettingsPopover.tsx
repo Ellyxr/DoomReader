@@ -1,5 +1,7 @@
+import { useRef, useState } from 'react'
 import { Smartphone } from 'lucide-react'
 import { Popover as PopoverPrimitive } from 'radix-ui'
+import { toast } from 'sonner'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
@@ -7,6 +9,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { setPref, usePrefs, type Prefs } from '@/hooks/prefs'
 import type { AutoScroll } from '@/hooks/useAutoScroll'
 import { downloadDictionary, useDictStatus } from '@/lib/dictionary'
+import { addCustomFont, FONT_ACCEPT, removeCustomFont, useCustomFont } from '@/lib/fonts'
 
 type Choice = Exclude<keyof Prefs, 'define' | 'tabBook'>
 type Option<K extends Choice> = [Prefs[K], string]
@@ -41,6 +44,7 @@ const SECTIONS: { [K in Choice]: { title: string; options: Option<K>[] } } = {
     options: [
       ['sans', 'Sans'],
       ['serif', 'Serif'],
+      ['custom', 'Custom'],
     ],
   },
 }
@@ -53,7 +57,7 @@ function Pills<V extends string>({
   onChange,
 }: {
   title: string
-  options: [V, string][]
+  options: [V, string, boolean?][]
   value: V
   onChange: (v: V) => void
 }) {
@@ -67,10 +71,11 @@ function Pills<V extends string>({
         className="w-full gap-1.5"
         aria-label={title}
       >
-        {options.map(([value, label]) => (
+        {options.map(([value, label, disabled]) => (
           <ToggleGroupItem
             key={value}
             value={value}
+            disabled={disabled}
             className="h-auto rounded-full border px-1 py-2 text-sm font-normal hover:bg-accent hover:text-foreground data-[state=on]:border-transparent data-[state=on]:bg-pill data-[state=on]:font-bold data-[state=on]:text-pill-foreground"
           >
             {label}
@@ -94,6 +99,70 @@ const AUTO_SCROLL: [AutoScroll, string][] = [
   ['6', '6s'],
   ['flow', 'Flow'],
 ]
+
+/** Sans, Serif or a font the reader uploaded, with the upload itself. Custom can be picked once there is one. */
+function TypefacePicker() {
+  const { font } = usePrefs()
+  const custom = useCustomFont()
+  const input = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const options: [Prefs['font'], string, boolean?][] = SECTIONS.font.options.map(([v, label]) =>
+    v === 'custom' ? [v, 'Custom', !custom] : [v, label],
+  )
+  const upload = async (file: File) => {
+    setBusy(true)
+    try {
+      await addCustomFont(file)
+      setPref('font', 'custom')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not use that font.', { description: file.name })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const link = 'font-bold text-primary hover:underline disabled:opacity-50'
+  return (
+    <div>
+      <Pills title="Typeface" options={options} value={font} onChange={v => setPref('font', v)} />
+      <p className="mt-1 text-[13px] leading-4 text-muted-foreground">
+        {custom ? (
+          <>
+            Custom: <span className="text-foreground">{custom.name}</span> ·{' '}
+            <button className={link} disabled={busy} onClick={() => input.current?.click()}>
+              Change
+            </button>{' '}
+            ·{' '}
+            <button
+              className={link}
+              onClick={() =>
+                void removeCustomFont().then(() => {
+                  if (font === 'custom') setPref('font', 'sans')
+                })
+              }
+            >
+              Remove
+            </button>
+          </>
+        ) : (
+          <button className={link} disabled={busy} onClick={() => input.current?.click()}>
+            {busy ? 'Loading font…' : 'Upload your own font (TTF, OTF, WOFF)'}
+          </button>
+        )}
+      </p>
+      <input
+        ref={input}
+        type="file"
+        accept={FONT_ACCEPT}
+        hidden
+        onChange={e => {
+          const f = e.target.files?.[0]
+          if (f) void upload(f)
+          e.target.value = ''
+        }}
+      />
+    </div>
+  )
+}
 
 /** The switch for looking words up, with how the offline dictionary's download is going. */
 function DefineSwitch() {
@@ -174,7 +243,7 @@ export function SettingsPopover({
           <>
             <Segmented k="len" />
             <Segmented k="size" />
-            <Segmented k="font" />
+            <TypefacePicker />
             {autoScroll && onAutoScroll && (
               <Pills title="Auto-scroll" options={AUTO_SCROLL} value={autoScroll} onChange={onAutoScroll} />
             )}

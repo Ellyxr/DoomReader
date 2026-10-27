@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ChevronDown, Pause, Play, SkipBack, SkipForward, Square } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { AlignLeft, ChevronDown, Pause, Play, SkipBack, SkipForward, Square, WholeWord } from 'lucide-react'
 
 import { BookAvatar } from '@/components/BookAvatar'
-import { RATES } from '@/hooks/useSpeech'
+import { RATES, useSpokenWord } from '@/hooks/useSpeech'
 import { bookColor, NEUTRAL, type BookColor } from '@/lib/color'
 import { speechChunks, type Post } from '@/lib/feed'
 import type { BookMeta } from '@/lib/types'
@@ -122,6 +122,100 @@ function Lyrics({
   )
 }
 
+/* ---------- word by word ---------- */
+
+export type PodcastMode = 'lines' | 'words'
+const MODE_KEY = 'doomreader:podcast-mode'
+
+function loadMode(): PodcastMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'words' ? 'words' : 'lines'
+  } catch {
+    return 'lines'
+  }
+}
+
+/** Word-by-word mode's background: a soft near-black (the dark-UI standard), since pure black smears on OLED screens as words move. */
+const NIGHT: BookColor = { bg: '#121212', deep: '#121212', dim: 'rgba(255,255,255,0.64)', faint: 'rgba(255,255,255,0.4)' }
+
+const SMALL = new Set(
+  'a an the of to in on at by for and or nor but so if as is am are was were be been it its i me my we us our you your he him his she her they them their this that these those with from not no do did has had have'.split(
+    ' ',
+  ),
+)
+/** A phrase ends at a pause in the speech, or after this many words, whichever comes first. */
+const PHRASE_WORDS = 6
+
+/**
+ * How big a word is drawn, in px: little words small, longer ones bigger, the end of a sentence biggest. Capped by the
+ * screen width, so a long word still fits on one line.
+ */
+function wordSize(word: string) {
+  const core = word.replace(/[^\p{L}\p{N}']/gu, '')
+  let px = SMALL.has(core.toLowerCase()) ? 30 : core.length <= 4 ? 44 : core.length <= 7 ? 54 : 62
+  if (/[.!?…]["”’)]*$/.test(word)) px += 8
+  return `min(${px}px, calc((min(100vw, 600px) - 48px) / ${(Math.max(core.length, 2) * 0.6).toFixed(2)}))`
+}
+
+/** The words of a sentence with their character offsets, cut into phrases. */
+function phrasesOf(text: string) {
+  const words = [...text.matchAll(/\S+/g)].map(m => ({ text: m[0], at: m.index }))
+  const phrases: { first: number; last: number }[] = []
+  let first = 0
+  words.forEach((w, i) => {
+    if (i - first + 1 >= PHRASE_WORDS || /[,.;:!?…—–]["”’)]*$/.test(w.text) || i === words.length - 1) {
+      phrases.push({ first, last: i })
+      first = i + 1
+    }
+  })
+  return { words, phrases }
+}
+
+/**
+ * The sentence being read, one word at a time, in the style of lyrics stickers: the words of the current phrase pile
+ * up as they are spoken, in big type whose size follows each word, and the next phrase starts on a clear screen.
+ */
+function Words({
+  posts,
+  post,
+  chunk,
+  onToggle,
+}: {
+  posts: Post[]
+  post: number
+  chunk: number
+  onToggle: () => void
+}) {
+  const text = sentenceAt(posts, post, chunk, 0).text
+  const { words, phrases } = useMemo(() => phrasesOf(text), [text])
+  const spoken = useSpokenWord()
+  const key = `${post}:${chunk}`
+  // the word being spoken; the first one when the voice hasn't reached this sentence (paused, or just skipped here)
+  let current = 0
+  if (spoken.key === key) for (let i = 0; i < words.length && words[i].at <= spoken.at; i++) current = i
+  const phrase = phrases.find(p => current <= p.last) ?? phrases[0]
+  if (!phrase) return <div className="flex-1" />
+  return (
+    <button
+      onClick={onToggle}
+      title="Play or pause"
+      aria-label={text}
+      className="flex min-h-0 flex-1 flex-wrap content-center items-baseline gap-x-[0.28em] overflow-hidden py-6 text-left font-read leading-[1.02] font-black tracking-tight text-white"
+    >
+      {words.slice(phrase.first, current + 1).map((w, i) => (
+        <span
+          key={`${key}:${phrase.first + i}`}
+          aria-hidden
+          className={cn('word-pop inline-block max-w-full break-words', phrase.first + i < current && 'opacity-60')}
+          style={{ fontSize: wordSize(w.text) }}
+        >
+          {w.text}
+        </span>
+      ))}
+    </button>
+  )
+}
+
 /** Keeps the screen on while listening here, since some phones stop speaking once the screen locks. */
 function useWakeLock(on: boolean) {
   useEffect(() => {
@@ -182,7 +276,18 @@ export function Podcast(props: Props) {
   const [last, setLast] = useState({ post: post ?? 0, chunk })
   if (post !== null && (post !== last.post || chunk !== last.chunk)) setLast({ post, chunk })
 
-  const [color, setColor] = useState<BookColor>(NEUTRAL)
+  const [mode, setModeState] = useState(loadMode)
+  const setMode = (m: PodcastMode) => {
+    setModeState(m)
+    try {
+      localStorage.setItem(MODE_KEY, m)
+    } catch {
+      /* not remembered */
+    }
+  }
+
+  const [bookTint, setColor] = useState<BookColor>(NEUTRAL)
+  const color = mode === 'words' ? NIGHT : bookTint
   useEffect(() => {
     let live = true
     void bookColor(meta).then(c => live && setColor(c))
@@ -270,10 +375,21 @@ export function Podcast(props: Props) {
             </div>
             <div className="truncate text-[14px] font-bold">{chapter}</div>
           </div>
-          <span className="size-11 shrink-0" />
+          <button
+            onClick={() => setMode(mode === 'words' ? 'lines' : 'words')}
+            aria-label={mode === 'words' ? 'Show whole sentences' : 'Show word by word'}
+            title={mode === 'words' ? 'Whole sentences' : 'Word by word'}
+            className={cn(ghost, '-mr-2 size-11')}
+          >
+            {mode === 'words' ? <AlignLeft className="size-6" /> : <WholeWord className="size-6" />}
+          </button>
         </header>
 
-        <Lyrics posts={posts} post={at} chunk={last.chunk} faint={color.faint} onSkip={onSkip} onToggle={onToggle} />
+        {mode === 'words' ? (
+          <Words posts={posts} post={at} chunk={last.chunk} onToggle={onToggle} />
+        ) : (
+          <Lyrics posts={posts} post={at} chunk={last.chunk} faint={color.faint} onSkip={onSkip} onToggle={onToggle} />
+        )}
 
         <div className="shrink-0">
           <div className="mb-4 flex items-center gap-3">

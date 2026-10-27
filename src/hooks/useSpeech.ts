@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 import { speechChunks, type Post } from '@/lib/feed'
 
@@ -16,6 +16,32 @@ function loadRate() {
   }
 }
 
+/* ---------- the word being spoken ---------- */
+
+/**
+ * Where in the current sentence the voice is: the start of the word being spoken, as a character offset. Kept outside
+ * React state so only the screen that shows words re-renders for each one, not the whole reader.
+ */
+let spoken = { key: '', at: -1 }
+const wordListeners = new Set<() => void>()
+const setSpoken = (key: string, at: number) => {
+  if (spoken.key === key && spoken.at === at) return
+  spoken = { key, at }
+  wordListeners.forEach(l => l())
+}
+const subscribeWord = (l: () => void) => {
+  wordListeners.add(l)
+  return () => wordListeners.delete(l)
+}
+/** `{ key: "<post>:<chunk>", at }`, the start of the word being spoken in that sentence (-1 before the first). */
+export const useSpokenWord = () => useSyncExternalStore(subscribeWord, () => spoken)
+
+/** Characters a voice speaks per second at 1×, for timing words when the browser doesn't report them. */
+const CHARS_PER_SEC = 14
+
+/** Word starts in `text`, for stepping through it by estimate. */
+const wordStarts = (text: string) => [...text.matchAll(/\S+/g)].map(m => m.index)
+
 /**
  * Reads the feed aloud with the browser's own voices (Web Speech API), a sentence at a time, calling `onPost` as each
  * post starts so the reader can scroll along. Pausing cancels and remembers the sentence, because
@@ -31,6 +57,7 @@ export function useSpeech(posts: Post[], onPost: (i: number) => void, onFail: ()
   const pos = useRef({ post: 0, chunk: 0 })
   const run = useRef(0) // bumped to orphan the callbacks of utterances that were cancelled
   const errors = useRef(0)
+  const guess = useRef(0) // the timer stepping through words by estimate
   const live = useRef({ posts, onPost, onFail, rate })
   useEffect(() => {
     live.current = { posts, onPost, onFail, rate }
@@ -54,10 +81,36 @@ export function useSpeech(posts: Post[], onPost: (i: number) => void, onFail: ()
     setPost(pos.current.post)
     setChunk(pos.current.chunk)
 
-    const u = new SpeechSynthesisUtterance(chunks[pos.current.chunk])
+    const text = chunks[pos.current.chunk]
+    const key = `${pos.current.post}:${pos.current.chunk}`
+    const u = new SpeechSynthesisUtterance(text)
     u.rate = live.current.rate
     u.lang = document.documentElement.lang || 'en'
+    setSpoken(key, -1)
+    // Word timing: the voice's own word events where the browser sends them (most desktop voices, Safari); otherwise,
+    // as with many Android voices, an estimate from each word's length and the speed, which those events replace if
+    // they turn up after all.
+    let reported = false
+    const starts = wordStarts(text)
+    const estimate = (k: number) => {
+      if (reported || token !== run.current || k >= starts.length) return
+      setSpoken(key, starts[k])
+      const len = (starts[k + 1] ?? text.length) - starts[k]
+      guess.current = window.setTimeout(() => estimate(k + 1), (len / (CHARS_PER_SEC * u.rate)) * 1000)
+    }
+    u.onstart = () => {
+      if (token !== run.current) return
+      clearTimeout(guess.current)
+      guess.current = window.setTimeout(() => estimate(0), 250)
+    }
+    u.onboundary = e => {
+      if (token !== run.current || e.name !== 'word') return
+      reported = true
+      clearTimeout(guess.current)
+      setSpoken(key, e.charIndex)
+    }
     u.onend = () => {
+      clearTimeout(guess.current)
       if (token !== run.current) return
       errors.current = 0
       pos.current.chunk++
@@ -81,6 +134,7 @@ export function useSpeech(posts: Post[], onPost: (i: number) => void, onFail: ()
 
   const halt = () => {
     run.current++
+    clearTimeout(guess.current)
     speechSynthesis.cancel()
   }
 
