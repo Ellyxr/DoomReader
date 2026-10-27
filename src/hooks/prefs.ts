@@ -11,11 +11,13 @@ export interface Prefs {
   theme: Theme
   /** Holding a word shows what it means. */
   define: boolean
+  /** The browser tab takes the title and cover of the book read last. */
+  tabBook: boolean
 }
 
 // Must match public/theme.js, which applies the theme before first paint.
 const KEY = 'doomreader:prefs'
-const DEFAULTS: Prefs = { len: 'm', size: 'm', font: 'sans', theme: 'system', define: false }
+const DEFAULTS: Prefs = { len: 'm', size: 'm', font: 'sans', theme: 'system', define: false, tabBook: true }
 
 function load(): Prefs {
   try {

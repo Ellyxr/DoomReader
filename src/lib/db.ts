@@ -122,6 +122,7 @@ export async function markOpened(id: string) {
   const db = await dbp
   const meta = await db.get('books', id)
   if (meta) await db.put('books', { ...meta, openedAt: Date.now() })
+  changed()
 }
 
 /* ---------- storage quota and persistence ---------- */

@@ -2,9 +2,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { setPref, usePrefs, type Prefs } from '@/hooks/prefs'
+import type { AutoScroll } from '@/hooks/useAutoScroll'
 import { downloadDictionary, useDictStatus } from '@/lib/dictionary'
 
-type Choice = Exclude<keyof Prefs, 'define'>
+type Choice = Exclude<keyof Prefs, 'define' | 'tabBook'>
 type Option<K extends Choice> = [Prefs[K], string]
 
 const SECTIONS: { [K in Choice]: { title: string; options: Option<K>[] } } = {
@@ -41,16 +42,25 @@ const SECTIONS: { [K in Choice]: { title: string; options: Option<K>[] } } = {
   },
 }
 
-function Segmented<K extends Choice>({ k }: { k: K }) {
-  const prefs = usePrefs()
-  const { title, options } = SECTIONS[k]
+/** A titled row of pills, one of which is chosen. */
+function Pills<V extends string>({
+  title,
+  options,
+  value,
+  onChange,
+}: {
+  title: string
+  options: [V, string][]
+  value: V
+  onChange: (v: V) => void
+}) {
   return (
     <div>
       <h4 className="mb-1.5 text-[13px] font-bold text-muted-foreground">{title}</h4>
       <ToggleGroup
         type="single"
-        value={prefs[k]}
-        onValueChange={v => v && setPref(k, v as Prefs[K])}
+        value={value}
+        onValueChange={v => v && onChange(v as V)}
         className="w-full gap-1.5"
         aria-label={title}
       >
@@ -67,6 +77,20 @@ function Segmented<K extends Choice>({ k }: { k: K }) {
     </div>
   )
 }
+
+function Segmented<K extends Choice>({ k }: { k: K }) {
+  const prefs = usePrefs()
+  const { title, options } = SECTIONS[k]
+  return <Pills title={title} options={options} value={prefs[k]} onChange={v => setPref(k, v)} />
+}
+
+const AUTO_SCROLL: [AutoScroll, string][] = [
+  ['off', 'Off'],
+  ['1', '1s'],
+  ['3', '3s'],
+  ['6', '6s'],
+  ['flow', 'Flow'],
+]
 
 /** The switch for looking words up, with how the offline dictionary's download is going. */
 function DefineSwitch() {
@@ -97,8 +121,35 @@ function DefineSwitch() {
   )
 }
 
-/** The "Aa" button. The library shows only the theme; the reader shows everything. */
-export function SettingsPopover({ reader = false }: { reader?: boolean }) {
+/** Whether the browser tab shows the book read last, instead of DoomReader. */
+function TabBookSwitch() {
+  const { tabBook } = usePrefs()
+  return (
+    <div>
+      <label className="flex cursor-pointer items-center justify-between gap-3">
+        <span className="text-[15px] leading-5">Show last read book in the browser tab</span>
+        <Switch checked={tabBook} onCheckedChange={on => setPref('tabBook', on)} />
+      </label>
+      <p className="mt-1 text-[13px] leading-4 text-muted-foreground">
+        Its title and cover replace DoomReader's. The installed app's icon stays the same.
+      </p>
+    </div>
+  )
+}
+
+/**
+ * The "Aa" button. The library shows the theme and the tab switch; the reader shows the reading settings, plus
+ * auto-scroll when given one (it lasts only while the book is open, so it is not a saved pref).
+ */
+export function SettingsPopover({
+  reader = false,
+  autoScroll,
+  onAutoScroll,
+}: {
+  reader?: boolean
+  autoScroll?: AutoScroll
+  onAutoScroll?: (v: AutoScroll) => void
+}) {
   return (
     <Popover>
       <PopoverTrigger
@@ -113,13 +164,18 @@ export function SettingsPopover({ reader = false }: { reader?: boolean }) {
         className="grid w-[min(300px,calc(100vw-24px))] gap-3.5 rounded-2xl p-3.5 shadow-pop"
       >
         <Segmented k="theme" />
-        {reader && (
+        {reader ? (
           <>
             <Segmented k="len" />
             <Segmented k="size" />
             <Segmented k="font" />
+            {autoScroll && onAutoScroll && (
+              <Pills title="Auto-scroll" options={AUTO_SCROLL} value={autoScroll} onChange={onAutoScroll} />
+            )}
             <DefineSwitch />
           </>
+        ) : (
+          <TabBookSwitch />
         )}
       </PopoverContent>
     </Popover>

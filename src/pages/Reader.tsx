@@ -29,6 +29,7 @@ import { SettingsPopover } from '@/components/SettingsPopover'
 import { Button } from '@/components/ui/button'
 import { WordTip } from '@/components/WordTip'
 import { usePrefs } from '@/hooks/prefs'
+import { useAutoScroll, type AutoScroll } from '@/hooks/useAutoScroll'
 import { useReorder } from '@/hooks/useReorder'
 import { useSentenceSelect } from '@/hooks/useSentenceSelect'
 import { RATES, speechSupported, useSpeech } from '@/hooks/useSpeech'
@@ -93,14 +94,10 @@ export default function Reader() {
     void Promise.all([getBook(id), getState(id)]).then(([b, s]) => {
       if (!live) return
       setLoaded({ id, book: b, saved: s ?? { seg: 0, likes: [], marks: [] } })
-      if (b) {
-        void markOpened(id)
-        document.title = `${b.meta.title} · DoomReader`
-      }
+      if (b) void markOpened(id)
     })
     return () => {
       live = false
-      document.title = 'DoomReader'
     }
   }, [id])
 
@@ -467,6 +464,23 @@ function Feed({
   // reading ran off the end of the book, or stopped some other way
   if (podcast && speech.post === null && !speech.playing) setPodcast(false)
 
+  /* ---------- auto-scroll: lasts while the book is open; waits while reading aloud, selecting or writing ---------- */
+  const [autoScroll, setAutoScroll] = useState<AutoScroll>('off')
+  const bottom = atEnd && rendered >= posts.length
+  const autoDone = autoScroll === 'flow' ? bottom : bottom || cur >= posts.length - 1
+  const autoDoneRef = useRef(autoDone)
+  useLayoutEffect(() => {
+    autoDoneRef.current = autoDone
+  })
+  useAutoScroll(autoScroll, tab === 'feed' && speech.post === null && !sel && !draft && !word, {
+    step: () => scrollToPost(live.current.cur + 1, true),
+    ended: () => autoDoneRef.current,
+    onEnd: () => {
+      setAutoScroll('off')
+      toast('Auto-scroll stopped', { description: 'You reached the end of the book.' })
+    },
+  })
+
   /* ---------- render ---------- */
   const current = posts[cur] ?? posts[0]
   const pct = atEnd && rendered >= posts.length ? 100 : (current?.pct ?? 0)
@@ -514,7 +528,7 @@ function Feed({
               <Headphones className="size-5" />
             </button>
           )}
-          <SettingsPopover reader />
+          <SettingsPopover reader autoScroll={autoScroll} onAutoScroll={setAutoScroll} />
         </div>
         {tab === 'search' ? (
           <SearchBox query={query} onQuery={setQuery} onClose={() => switchTab('feed')} />
@@ -622,6 +636,10 @@ function Feed({
           }}
           onClose={clearSel}
         />
+      )}
+
+      {autoScroll !== 'off' && tab === 'feed' && speech.post === null && !sel && (
+        <AutoScrollBar mode={autoScroll} onMode={setAutoScroll} />
       )}
 
       {speech.post !== null && !sel && !podcast && (
@@ -793,6 +811,47 @@ function Player({
       <button
         onClick={onStop}
         aria-label="Stop reading aloud"
+        className="grid size-9 shrink-0 place-items-center rounded-full hover:bg-accent"
+      >
+        <Square className="size-4 fill-current" />
+      </button>
+    </div>
+  )
+}
+
+const SPEEDS: Exclude<AutoScroll, 'off'>[] = ['1', '3', '6', 'flow']
+
+/** Shown while auto-scroll is on, in the read-aloud player's place: change its speed or stop it. */
+function AutoScrollBar({ mode, onMode }: { mode: Exclude<AutoScroll, 'off'>; onMode: (m: AutoScroll) => void }) {
+  const next = SPEEDS[(SPEEDS.indexOf(mode) + 1) % SPEEDS.length]
+  const name = (m: AutoScroll) => (m === 'flow' ? 'Flow' : `${m}s`)
+  return (
+    <div
+      role="region"
+      aria-label="Auto-scroll"
+      className="fixed z-25 flex h-14 items-center gap-1 rounded-full border bg-background pr-2 pl-4 shadow-pop"
+      style={{
+        bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
+        left: 'calc(max(16px, (100vw - 600px) / 2 + 16px) + env(safe-area-inset-left, 0px))',
+        maxWidth: 'calc(min(100vw, 600px) - 32px - 56px - 12px)',
+      }}
+    >
+      <span className="min-w-0 flex-1 truncate pr-1 text-[13px]">
+        <b className="block font-bold">Auto-scrolling</b>
+        <span className="text-muted-foreground">
+          {mode === 'flow' ? 'Steady glide' : `Next post every ${mode}s`}
+        </span>
+      </span>
+      <button
+        onClick={() => onMode(next)}
+        aria-label={`Speed ${name(mode)}, change to ${name(next)}`}
+        className="h-9 shrink-0 rounded-full px-2 text-[13px] font-bold tabular-nums hover:bg-accent"
+      >
+        {name(mode)}
+      </button>
+      <button
+        onClick={() => onMode('off')}
+        aria-label="Stop auto-scroll"
         className="grid size-9 shrink-0 place-items-center rounded-full hover:bg-accent"
       >
         <Square className="size-4 fill-current" />

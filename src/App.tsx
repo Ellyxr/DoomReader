@@ -3,11 +3,13 @@ import { createHashRouter, Outlet, RouterProvider } from 'react-router'
 
 import { Importer } from '@/components/Importer'
 import { Toaster } from '@/components/ui/sonner'
+import { useTabIdentity } from '@/hooks/useTabIdentity'
 import Library from '@/pages/Library'
 
 const Reader = lazy(() => import('@/pages/Reader'))
 
 function Layout() {
+  useTabIdentity()
   return (
     <Importer>
       <Suspense>
