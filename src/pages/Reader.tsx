@@ -1,7 +1,9 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
+  ArrowDown,
   ArrowLeft,
   ArrowDownUp,
+  ArrowUp,
   ChevronUp,
   Copy,
   GripVertical,
@@ -347,6 +349,37 @@ function Feed({
   }, [posts])
 
   /* ---------- tabs and keys ---------- */
+  /* ---------- back to the top of the chapter, and back again ---------- */
+
+  // the first post of each chapter
+  const chapterStart = useMemo(() => {
+    const m = new Map<number, number>()
+    posts.forEach((p, i) => m.has(p.ch) || m.set(p.ch, i))
+    return m
+  }, [posts])
+  /** Where the reader was before going to the chapter's top, by segment; `left` once they have moved up from it. */
+  const [backTo, setBackTo] = useState<{ seg: number; left: boolean } | null>(null)
+  const goUp = () => {
+    const { posts, cur } = live.current
+    const top = chapterStart.get(posts[cur]?.ch ?? 0) ?? 0
+    setBackTo({ seg: posts[cur].s, left: false })
+    scrollToPost(top, true)
+  }
+  const goBack = () => {
+    if (backTo) scrollToPost(postIndexOfSeg(live.current.posts, backTo.seg), true)
+    setBackTo(null)
+  }
+  // the way back goes once it's been taken by scrolling, or after a while
+  const curSeg = posts[cur]?.s ?? 0
+  if (backTo && !backTo.left && curSeg < backTo.seg) setBackTo({ ...backTo, left: true })
+  else if (backTo?.left && curSeg >= backTo.seg) setBackTo(null)
+  const backSeg = backTo?.seg
+  useEffect(() => {
+    if (backSeg === undefined) return
+    const t = setTimeout(() => setBackTo(null), 8000)
+    return () => clearTimeout(t)
+  }, [backSeg])
+
   const switchTab = useCallback((t: Tab) => {
     if (live.current.tab === t) return
     if (live.current.tab === 'feed') feedY.current = scrollY
@@ -550,6 +583,9 @@ function Feed({
   const autoBar = autoScroll !== 'off' && tab === 'feed' && speech.post === null && !sel
   const playerBar = speech.post !== null && !sel && !podcast
   const current = posts[cur] ?? posts[0]
+  const chapterTop = chapterStart.get(current?.ch ?? 0) ?? 0
+  /** Far enough into the chapter that its top is worth a shortcut: the Reading tab grows an arrow. */
+  const canGoUp = tab === 'feed' && cur - chapterTop >= 2
   const pct = atEnd && rendered >= posts.length ? 100 : (current?.pct ?? 0)
   const isSample = meta.format === 'sample'
   const { pick } = useImporter()
@@ -606,10 +642,15 @@ function Feed({
                 key={t}
                 role="tab"
                 aria-selected={tab === t}
-                onClick={() => switchTab(t)}
+                onClick={() => (t === 'feed' && canGoUp ? goUp() : switchTab(t))}
+                aria-label={t === 'feed' && canGoUp ? 'Reading: back to the top of the chapter' : undefined}
+                title={t === 'feed' && canGoUp ? 'Back to the top of the chapter' : undefined}
                 className="grid h-[53px] flex-1 place-items-center font-medium text-muted-foreground hover:bg-accent aria-selected:font-bold aria-selected:text-foreground"
               >
-                <span className="relative inline-block py-[15px]">
+                <span className="relative inline-flex items-center py-[15px]">
+                  {t === 'feed' && canGoUp && (
+                    <ArrowUp className="mr-1 size-4 text-primary duration-200 animate-in fade-in zoom-in-50" />
+                  )}
                   {label}
                   {t === 'notes' && notes.length > 0 && (
                     <span className="ml-1 text-[13px] text-muted-foreground tabular-nums">{notes.length}</span>
@@ -626,6 +667,15 @@ function Feed({
             style={{ width: pct + '%' }}
           />
         </div>
+        {tab === 'feed' && backTo && (
+          <button
+            onClick={goBack}
+            className="absolute top-full left-1/2 mt-3 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-primary py-2 pr-4 pl-3 text-[14px] font-bold whitespace-nowrap text-white shadow-pop duration-300 animate-in fade-in slide-in-from-top-2"
+          >
+            <ArrowDown className="size-4" />
+            Back to where you were
+          </button>
+        )}
       </header>
 
       <main>
@@ -749,8 +799,8 @@ function Feed({
         onDelete={deleteDraft}
       />
 
-      {/* the player bars sit where the scanner and shortcut buttons go */}
-      <Fab extras={!autoBar && !playerBar} />
+      {/* the player bars sit along the bottom, left of the + button */}
+      <Fab />
     </div>
   )
 }
@@ -801,7 +851,7 @@ function SelectionBar({
         </div>
         {count > 0 && (
           <p className="touch-only mb-2.5 text-[12px] text-muted-foreground">
-            {count} {count === 1 ? 'sentence' : 'sentences'} · drag while holding, or tap another sentence to extend
+            {count} {count === 1 ? 'word' : 'words'} · drag while holding, or tap another word to extend
           </p>
         )}
         <div className="grid grid-cols-3 gap-2">
@@ -1047,7 +1097,7 @@ function NotesList({
       <div className="mx-auto max-w-[420px] px-8 py-12">
         <h3 className="mb-2 text-[31px] leading-[1.1] font-extrabold tracking-tight">Your notes live here</h3>
         <p className="text-muted-foreground">
-          <span className="touch-only">Hold a sentence in any post and drag to select more, then save it as a quote. </span>
+          <span className="touch-only">Hold a word in any post and drag to select more, then save it as a quote. </span>
           <span className="touch-hide">Select words in any post to save them as a quote. </span>
           Tap reply on a post to write a note about it.
         </p>
@@ -1152,7 +1202,7 @@ function WelcomePost({ onOpen }: { onOpen: () => void }) {
         <p>
           Add any EPUB or PDF with the blue button, or drop the file anywhere on this page. Each chapter becomes a thread,
           and your books, place, likes and bookmarks are kept on this device.
-          <span className="touch-only"> Hold a sentence and drag to quote it.</span>
+          <span className="touch-only"> Hold a word and drag to quote it.</span>
           <span className="touch-hide"> Select words to quote them, and press j and k to move between posts.</span>
         </p>
         <p>Below is a sample: the first two chapters of Pride and Prejudice, which is in the public domain.</p>

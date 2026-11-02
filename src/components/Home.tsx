@@ -9,9 +9,12 @@ import { usePrefs } from '@/hooks/prefs'
 import { getBook, getState, setPreview } from '@/lib/db'
 import { leaveHome, openWithMorph } from '@/lib/morph'
 import type { BookMeta, PostPreview } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 /** Holding a preview this long goes into the book. */
-const HOLD_MS = 450
+const HOLD_MS = 600
+/** The hold shows itself only after this, so an ordinary tap never flashes it. */
+const HOLD_SHOW_MS = 120
 /** A finger that moves this far is scrolling, not holding. */
 const SLOP_PX = 10
 
@@ -52,7 +55,9 @@ function PreviewCard({
   const [clipped, setClipped] = useState(false)
   /** Opened out: the full height it grows to, then 'all' once it has (so a new text size still fits). */
   const [open, setOpen] = useState<number | 'all' | null>(null)
-  const hold = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null)
+  const hold = useRef<{ timer: number; show: number; x: number; y: number; fired: boolean } | null>(null)
+  /** Being held: the card sinks in a little and a bar fills along its foot until it goes into the book. */
+  const [holding, setHolding] = useState(false)
 
   useLayoutEffect(() => {
     const el = text.current
@@ -67,7 +72,11 @@ function PreviewCard({
     } else enter()
   }
   const endHold = () => {
-    if (hold.current) clearTimeout(hold.current.timer)
+    if (hold.current) {
+      clearTimeout(hold.current.timer)
+      clearTimeout(hold.current.show)
+    }
+    setHolding(false)
   }
 
   return (
@@ -87,7 +96,11 @@ function PreviewCard({
           <span className="truncate">{preview?.chapter || 'Continue reading'}</span>
         </div>
       }
-      className="cursor-pointer select-none [-webkit-touch-callout:none]"
+      className={cn(
+        'relative cursor-pointer overflow-hidden select-none [-webkit-touch-callout:none]',
+        'transition-[transform,background-color] duration-200 ease-out motion-reduce:transition-none',
+        holding && 'scale-[0.985] bg-primary/[0.06] hover:bg-primary/[0.06] motion-reduce:scale-100',
+      )}
       onPointerDown={e => {
         hold.current = null
         if (e.button !== 0) return
@@ -96,6 +109,7 @@ function PreviewCard({
           x,
           y,
           fired: false,
+          show: window.setTimeout(() => setHolding(true), HOLD_SHOW_MS),
           timer: window.setTimeout(() => {
             hold.current!.fired = true
             navigator.vibrate?.(10)
@@ -141,8 +155,20 @@ function PreviewCard({
           <div className="h-full rounded-full bg-primary" style={{ width: `${preview?.pct ?? book.progress}%` }} />
         </div>
         <span className="tabular-nums">{preview?.pct ?? book.progress}%</span>
-        <span className="font-bold text-primary">{clipped && open === null ? 'Read more' : 'Keep reading ›'}</span>
+        <span className="font-bold text-primary" aria-live="polite">
+          {holding ? 'Keep holding…' : clipped && open === null ? 'Read more' : 'Keep reading ›'}
+        </span>
       </div>
+      {/* fills over the rest of the hold; drains quickly if the finger lifts early */}
+      <i
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 h-[3px] origin-left bg-primary ease-linear"
+        style={{
+          transform: `scaleX(${holding ? 1 : 0})`,
+          transitionProperty: 'transform',
+          transitionDuration: holding ? `${HOLD_MS - HOLD_SHOW_MS}ms` : '150ms',
+        }}
+      />
     </PostShell>
   )
 }

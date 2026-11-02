@@ -1,7 +1,7 @@
 import JSZip from 'jszip'
 
 import type { Block, BookImage, Chapter, ParsedBook } from '@/lib/types'
-import { esc, textOf, yieldToBrowser } from './html'
+import { esc, escAttr, safeHref, textOf, yieldToBrowser } from './html'
 import { fitImage, thumbnailsFromBlob } from './images'
 
 type Progress = (done: number, total: number) => void
@@ -53,7 +53,11 @@ function inline(n: Node): string {
     const inner = inline(el)
     if (t === 'em' || t === 'i' || t === 'cite' || t === 'dfn') s += inner.trim() ? `<em>${inner}</em>` : inner
     else if (t === 'strong' || t === 'b') s += inner.trim() ? `<strong>${inner}</strong>` : inner
-    else s += inner
+    else if (t === 'a') {
+      // links to the web are kept; links within the book point at pages that don't exist here, so only their text is
+      const href = safeHref(el.getAttribute('href'))
+      s += href && inner.trim() ? `<a href="${escAttr(href)}">${inner}</a>` : inner
+    } else s += inner
   }
   return s
 }

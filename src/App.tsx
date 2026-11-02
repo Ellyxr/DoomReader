@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react'
 import { createHashRouter, Outlet, RouterProvider, useNavigate } from 'react-router'
 
 import { Importer } from '@/components/Importer'
+import { LinkSheet } from '@/components/LinkSheet'
 import { Toaster } from '@/components/ui/sonner'
 import { usePrefs } from '@/hooks/prefs'
 import { useTabIdentity } from '@/hooks/useTabIdentity'
@@ -26,6 +27,7 @@ function Layout() {
       </Suspense>
       {/* sit above the floating + button */}
       <Toaster position="bottom-center" offset={88} mobileOffset={{ bottom: 88 }} />
+      <LinkSheet />
     </Importer>
   )
 }
@@ -51,7 +53,7 @@ const router = createHashRouter([
       { path: '/read/:id', element: <Reader /> },
       { path: '/sync/:code', element: <Sync /> },
       { path: '/continue', element: <Continue /> },
-      // the "Scan a sync code" shortcut: the library with the scanner open (components/Fab)
+      // the "Scan a sync code" shortcut: the library with the scanner open (pages/Library)
       { path: '/scan', element: <Library /> },
       { path: '*', element: <Library /> },
     ],

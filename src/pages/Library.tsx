@@ -11,13 +11,15 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { Link } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 
 import { Fab } from '@/components/Fab'
 import { Home, inProgress } from '@/components/Home'
 import { useImporter } from '@/components/Importer'
+import { ScanDialog } from '@/components/ScanDialog'
 import { SettingsPopover } from '@/components/SettingsPopover'
+import { ShortcutDialog, Shortcuts, type Editing } from '@/components/Shortcuts'
 import { SyncDialog } from '@/components/SyncDialog'
 import {
   AlertDialog,
@@ -418,6 +420,15 @@ export default function Library() {
   const [query, setQuery] = useState('')
   const [toDelete, setToDelete] = useState<BookMeta | null>(null)
   const [toRename, setToRename] = useState<BookMeta | null>(null)
+  const [shortcut, setShortcut] = useState<Editing>(null)
+  // the app icon's "Scan a sync code" shortcut lands on #/scan with the scanner open
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const [scanning, setScanning] = useState(pathname === '/scan')
+  const closeScan = () => {
+    setScanning(false)
+    if (pathname === '/scan') navigate('/', { replace: true })
+  }
   const [syncing, setSyncing] = useState<SyncPayload | null>(null)
   const openSync = async (b: BookMeta) => {
     const state = (await getState(b.id)) ?? { id: b.id, seg: 0, likes: [], marks: [] }
@@ -495,7 +506,7 @@ export default function Library() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <SettingsPopover />
+          <SettingsPopover onScan={() => setScanning(true)} onAddShortcut={() => setShortcut({ k: 'add' })} />
         </div>
         {!!books?.length && <ViewTabs />}
         {!home && books && books.length > 3 && (
@@ -579,7 +590,10 @@ export default function Library() {
 
       <RenameDialog book={toRename} onClose={() => setToRename(null)} />
       <SyncDialog payload={syncing} onClose={() => setSyncing(null)} />
+      <Shortcuts onEdit={s => setShortcut({ k: 'edit', s })} />
       <Fab />
+      <ShortcutDialog editing={shortcut} onClose={() => setShortcut(null)} />
+      <ScanDialog open={scanning} onClose={closeScan} />
     </div>
   )
 }

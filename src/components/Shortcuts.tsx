@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Link, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { Dialog } from 'radix-ui'
 import { toast } from 'sonner'
 
@@ -85,42 +85,31 @@ function ShortcutButton({ s, onEdit }: { s: Shortcut; onEdit: () => void }) {
   )
 }
 
-type Editing = { k: 'add' } | { k: 'edit'; s: Shortcut } | null
+export type Editing = { k: 'add' } | { k: 'edit'; s: Shortcut } | null
 
-/** Up to three link shortcuts, bottom-left of the 600px column, mirroring the + and scan buttons on the right. */
-export function Shortcuts() {
+/**
+ * The reader's link shortcuts, bottom-left of the 600px column, across from the + button. Only on Home and Library:
+ * inside a book they'd sit over the text. New ones are added from the Aa menu there.
+ */
+export function Shortcuts({ onEdit }: { onEdit: (s: Shortcut) => void }) {
   const shortcuts = useShortcuts()
-  const [editing, setEditing] = useState<Editing>(null)
+  if (!shortcuts.length) return null
   return (
-    <>
-      <div
-        className="fixed z-25 flex gap-2"
-        style={{
-          bottom: 'calc(24px + env(safe-area-inset-bottom, 0px))',
-          left: 'calc(max(16px, (100vw - 600px) / 2 + 16px) + env(safe-area-inset-left, 0px))',
-        }}
-      >
-        {shortcuts.map(s => (
-          <ShortcutButton key={s.id} s={s} onEdit={() => setEditing({ k: 'edit', s })} />
-        ))}
-        {shortcuts.length < MAX_SHORTCUTS && (
-          <button
-            onClick={() => setEditing({ k: 'add' })}
-            aria-label="Add a shortcut link"
-            title="Add a shortcut link"
-            className={cn(BUTTON, 'border-dashed border-muted-foreground/50 text-muted-foreground shadow-none hover:bg-accent')}
-          >
-            {/* not a + : that's the add-a-book button next door */}
-            <Link className="size-5" />
-          </button>
-        )}
-      </div>
-      <ShortcutDialog editing={editing} onClose={() => setEditing(null)} />
-    </>
+    <div
+      className="fixed z-25 flex gap-2"
+      style={{
+        bottom: 'calc(24px + env(safe-area-inset-bottom, 0px))',
+        left: 'calc(max(16px, (100vw - 600px) / 2 + 16px) + env(safe-area-inset-left, 0px))',
+      }}
+    >
+      {shortcuts.map(s => (
+        <ShortcutButton key={s.id} s={s} onEdit={() => onEdit(s)} />
+      ))}
+    </div>
   )
 }
 
-function ShortcutDialog({ editing, onClose }: { editing: Editing; onClose: () => void }) {
+export function ShortcutDialog({ editing, onClose }: { editing: Editing; onClose: () => void }) {
   return (
     <Dialog.Root open={!!editing} onOpenChange={o => !o && onClose()}>
       <Dialog.Portal>

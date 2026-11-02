@@ -116,6 +116,14 @@ export function sentences({ text, blocks }: PostText): Range[] {
   return out
 }
 
+/** The words of a post's text, each with the punctuation touching it (so a quote keeps its full stop). */
+export function words({ text, blocks }: PostText): Range[] {
+  const out: Range[] = []
+  for (const [s, e] of blocks.length ? blocks : [[0, text.length] as [number, number]])
+    for (const m of text.slice(s, e).matchAll(/\S+/g)) out.push({ a: s + m.index, b: s + m.index + m[0].length })
+  return out
+}
+
 /** The selected words, one line per block, as stored in a quote. */
 export function quoteOf({ text, blocks }: PostText, { a, b }: Range) {
   const parts = blocks.length

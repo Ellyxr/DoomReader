@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-/** A link the reader keeps beside the floating buttons. Saved on this device only. */
+/** A link the reader keeps as a floating button on Home and Library. Saved on this device only. */
 export interface Shortcut {
   id: string
   url: string

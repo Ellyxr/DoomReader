@@ -53,15 +53,20 @@ function balance(pieces: string[]) {
   })
 }
 
+const count = (s: string, re: RegExp) => s.match(re)?.length ?? 0
+
 /** Paragraph HTML cut into sentences, keeping "Mr." and initials with the words after them. */
 function cutSentences(html: string) {
-  const re = /([.!?…]+)(["”’')\]]*)((?:<\/(?:em|strong)>)*)\s+/g
+  const re = /([.!?…]+)(["”’')\]]*)((?:<\/(?:em|strong|a)>)*)\s+/g
   const cuts: number[] = []
   let m: RegExpExecArray | null
   while ((m = re.exec(html))) {
     const end = re.lastIndex
     const next = html.charAt(end)
     if (!/[A-Z“"‘'(<\d—]/.test(next) || html.substr(end, 2) === '</') continue
+    // never inside a link: each piece must hold whole links (balance only mends <em> and <strong>)
+    const before = html.slice(0, end)
+    if (count(before, /<a[\s>]/g) > count(before, /<\/a>/g)) continue
     if (m[1] === '.') {
       const before = textOf(html.slice(Math.max(0, m.index - 40), m.index))
       const w = (before.match(/([A-Za-z]+)$/) || [])[1]

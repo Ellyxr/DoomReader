@@ -5,6 +5,7 @@ import { BookmarkIcon, HeartIcon, ReplyIcon, ShareIcon, VerifiedIcon, ViewsIcon 
 import { PostMedia } from '@/components/PostMedia'
 import { bodyHtml, fmtTime, postImages, type Post } from '@/lib/feed'
 import { findQuote, markHtml, postText, type Mark } from '@/lib/highlight'
+import { linkify } from '@/lib/links'
 import type { Note } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -218,7 +219,7 @@ export const PostCard = memo(function PostCard({
   const icon = 'size-[18.75px]'
   // saved quotes are highlighted where they appear in the text; the selection being made is drawn on top
   const html = useMemo(() => {
-    const base = bodyHtml(post)
+    const base = linkify(bodyHtml(post))
     const quoted = notes?.some(n => n.quote)
     if (!quoted && selA === undefined) return base
     const { text } = postText(base)

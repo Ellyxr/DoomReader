@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Smartphone } from 'lucide-react'
+import { Link, ScanQrCode, Smartphone } from 'lucide-react'
 import { Popover as PopoverPrimitive } from 'radix-ui'
 import { toast } from 'sonner'
 
@@ -10,6 +10,7 @@ import { clampSize, FONT_SIZE, setPref, usePrefs, type Prefs } from '@/hooks/pre
 import type { AutoScroll } from '@/hooks/useAutoScroll'
 import { downloadDictionary, useDictStatus } from '@/lib/dictionary'
 import { addCustomFont, FONT_ACCEPT, removeCustomFont, useCustomFont } from '@/lib/fonts'
+import { MAX_SHORTCUTS, useShortcuts } from '@/lib/shortcuts'
 import { GOAL } from '@/lib/streak'
 import { canBadge } from '@/lib/widgets'
 
@@ -278,21 +279,61 @@ function StreakBadgeSwitch() {
   )
 }
 
+const ROW =
+  'flex items-center gap-2.5 rounded-xl px-1.5 py-2 text-left text-[15px] hover:bg-accent disabled:pointer-events-none disabled:opacity-50'
+
+/** Home and Library's actions: picking up a book from another device, and adding a link shortcut. */
+function LibraryActions({ onScan, onAddShortcut }: { onScan?: () => void; onAddShortcut?: () => void }) {
+  const used = useShortcuts().length
+  const full = used >= MAX_SHORTCUTS
+  return (
+    <div className="-mx-1.5 -mb-1.5 grid border-t pt-1.5">
+      {onScan && (
+        <PopoverPrimitive.Close onClick={onScan} className={ROW}>
+          <ScanQrCode className="size-[18px] shrink-0" />
+          Scan a sync code
+        </PopoverPrimitive.Close>
+      )}
+      {onAddShortcut && (
+        <PopoverPrimitive.Close onClick={onAddShortcut} disabled={full} className={ROW}>
+          <Link className="size-[18px] shrink-0" />
+          <span className="flex-1">Add a shortcut link</span>
+          <span className="text-[13px] text-muted-foreground tabular-nums">
+            {full ? 'Full' : `${used} of ${MAX_SHORTCUTS}`}
+          </span>
+        </PopoverPrimitive.Close>
+      )}
+      {full && (
+        <p className="px-1.5 pb-1 text-[13px] leading-4 text-muted-foreground">
+          Long-press a shortcut (or right-click it) to change or remove it.
+        </p>
+      )}
+    </div>
+  )
+}
+
 /**
- * The "Aa" button. The library shows the theme and the tab switch; the reader shows the reading settings, plus
- * auto-scroll when given one (it lasts only while the book is open, so it is not a saved pref).
+ * The "Aa" button. Home and Library show the theme, the tab and badge switches, and the scan and shortcut actions;
+ * the reader shows the reading settings, plus auto-scroll when given one (it lasts only while the book is open, so it
+ * is not a saved pref).
  */
 export function SettingsPopover({
   reader = false,
   autoScroll,
   onAutoScroll,
   onSync,
+  onScan,
+  onAddShortcut,
 }: {
   reader?: boolean
   autoScroll?: AutoScroll
   onAutoScroll?: (v: AutoScroll) => void
   /** Opens "Continue on another device". */
   onSync?: () => void
+  /** Home and Library: opens the sync code scanner. */
+  onScan?: () => void
+  /** Home and Library: opens the dialog for a new link shortcut. */
+  onAddShortcut?: () => void
 }) {
   return (
     <Popover>
@@ -331,6 +372,7 @@ export function SettingsPopover({
           <>
             <TabBookSwitch />
             <StreakBadgeSwitch />
+            {(onScan || onAddShortcut) && <LibraryActions onScan={onScan} onAddShortcut={onAddShortcut} />}
           </>
         )}
       </PopoverContent>

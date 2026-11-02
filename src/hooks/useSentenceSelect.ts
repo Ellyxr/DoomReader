@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { wordAt } from '@/lib/dictionary'
 import type { Post } from '@/lib/feed'
-import { domText, quoteOf, sentences, type PostText, type Range } from '@/lib/highlight'
+import { domText, quoteOf, words, type PostText, type Range } from '@/lib/highlight'
 
 export interface TextSelection {
   /** Post index, plus its first segment to tell when posts were regrouped underneath it. */
@@ -11,7 +11,7 @@ export interface TextSelection {
   a: number
   b: number
   quote: string
-  /** Sentences selected (touch only). */
+  /** Words selected (touch only). */
   count: number
   /** A mouse selection drawn by the browser itself, rather than a finger selection drawn as marks. */
   native: boolean
@@ -58,7 +58,7 @@ function measure(el: HTMLElement, post: number): Cache {
       if (b) boxes.push({ i, l: b.left - o.left, t: b.top - o.top, r: b.right - o.left, b: b.bottom - o.top })
     }
   }
-  return { el, post, pt, units: sentences(pt), boxes }
+  return { el, post, pt, units: words(pt), boxes }
 }
 
 /** The character under a point, or the nearest one; works the same whether or not the text is selectable. */
@@ -102,14 +102,14 @@ const vibrate = (ms: number) => {
 }
 
 /**
- * Selecting passages to quote. On touch screens: hold a sentence to select it, keep holding and drag to grow the
- * selection sentence by sentence (the page doesn't scroll meanwhile, except near the top and bottom edges), and while
- * it's selected, tap another sentence in the post to extend to it. The browser's own long-press selection is turned
+ * Selecting passages to quote. On touch screens: hold a word to select it, keep holding and drag to grow the
+ * selection word by word (the page doesn't scroll meanwhile, except near the top and bottom edges), and while it's
+ * selected, tap another word in the post to extend to it. The browser's own long-press selection is turned
  * off in post text (see `html.touch-ui` in index.css), since it works word by word with fiddly handles.
  * With a mouse, ordinary text selection is used.
  *
  * With `define` on, holding still on a word picks that word instead (to show its meaning); dragging on from there turns
- * it into a sentence selection as above. A mouse held still on a word does the same.
+ * it into a selection as above. A mouse held still on a word does the same.
  */
 export function useSentenceSelect(posts: Post[], define: boolean) {
   const [sel, setSel] = useState<TextSelection | null>(null)
@@ -168,7 +168,7 @@ export function useSentenceSelect(posts: Post[], define: boolean) {
       const f = unitAt(cache.units, charAt(cache, drag.x, drag.y))
       if (f !== drag.focus) {
         drag.focus = f
-        vibrate(6)
+        vibrate(4)
         emit(true)
       }
     }
@@ -248,7 +248,7 @@ export function useSentenceSelect(posts: Post[], define: boolean) {
       drag.y = t.clientY
       if (look) {
         if (Math.hypot(t.clientX - look.x, t.clientY - look.y) <= SLOP) return
-        // dragging away from a looked-up word selects sentences instead
+        // dragging away from a looked-up word selects from it instead
         look = null
         setWord(null)
         emit(true)
@@ -274,7 +274,7 @@ export function useSentenceSelect(posts: Post[], define: boolean) {
       const cur = live.current.sel
       if (!cur || cur.native || cur.dragging) return
       if (tap.post === cur.post) {
-        // extend the selection to the tapped sentence
+        // extend the selection to the tapped word
         if (!cache || cache.el !== tap.el || cache.post !== tap.post) cache = measure(tap.el, tap.post)
         const anchor = unitAt(cache.units, cur.a)
         const end = unitAt(cache.units, cur.b - 1)
@@ -408,7 +408,7 @@ export function useSentenceSelect(posts: Post[], define: boolean) {
 
   const clearWord = useCallback(() => setWord(null), [])
 
-  /** Turns the looked-up word into a selection of its sentence, ready to quote. */
+  /** Turns the looked-up word into a selection, ready to quote or to extend by tapping further words. */
   const quoteWord = useCallback(() => {
     const { word: w, posts } = live.current
     setWord(null)
