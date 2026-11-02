@@ -276,7 +276,7 @@ export const PostCard = memo(function PostCard({
         <Action label="Bookmark" tone="primary" pressed={marked} onClick={() => onAction(post, 'mark')}>
           <BookmarkIcon className={cn(icon, marked && 'fill-current')} />
         </Action>
-        <Action label="Copy this passage" tone="primary" onClick={() => onAction(post, 'share')}>
+        <Action label="Share this passage" tone="primary" onClick={() => onAction(post, 'share')}>
           <ShareIcon className={icon} />
         </Action>
       </div>

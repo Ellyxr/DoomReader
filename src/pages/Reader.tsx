@@ -9,6 +9,7 @@ import {
   GripVertical,
   Headphones,
   Highlighter,
+  ImageIcon,
   MessageSquarePlus,
   Pause,
   Pencil,
@@ -26,6 +27,7 @@ import { PinIcon } from '@/components/icons'
 import { useImporter } from '@/components/Importer'
 import { NoteComposer, type Draft } from '@/components/NoteComposer'
 import { Podcast } from '@/components/Podcast'
+import { QuoteCardSheet, type CardRequest } from '@/components/QuoteCardSheet'
 import {
   ago,
   handleOf,
@@ -165,6 +167,7 @@ function Feed({
   )
   const notesCustom = useMemo(() => !inBookOrder(notes, segs), [notes, segs])
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [card, setCard] = useState<CardRequest | null>(null)
   const [flash, setFlash] = useState<number | null>(null)
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
@@ -179,6 +182,10 @@ function Feed({
       handle: handleOf(meta.author),
       book: meta.id,
     }),
+    [meta],
+  )
+  const cardBook = useMemo(
+    () => ({ title: meta.title, author: meta.author, cover: meta.cover, avatar: meta.avatar }),
     [meta],
   )
 
@@ -422,8 +429,8 @@ function Feed({
     async (p: Post, action: PostAction) => {
       if (action === 'share') {
         const { meta } = live.current
-        const ok = await copyText(`${plainText(p)}\n\n— ${meta.author}, ${meta.title}`)
-        toast(ok ? 'Copied to clipboard' : 'Copying is not available here')
+        const text = plainText(p)
+        setCard({ quote: text, copy: `${text}\n\n— ${meta.author}, ${meta.title}` })
         return
       }
       if (action === 'reply') {
@@ -751,6 +758,10 @@ function Feed({
             toast(ok ? 'Copied to clipboard' : 'Copying is not available here')
             clearSel()
           }}
+          onImage={() => {
+            setCard({ quote: sel.quote })
+            clearSel()
+          }}
           onClose={clearSel}
         />
       )}
@@ -797,7 +808,10 @@ function Feed({
         onClose={() => setDraft(null)}
         onSave={saveDraft}
         onDelete={deleteDraft}
+        onImage={quote => setCard({ quote })}
       />
+
+      <QuoteCardSheet card={card} book={cardBook} onClose={() => setCard(null)} />
 
       {/* the player bars sit along the bottom, left of the + button */}
       <Fab />
@@ -815,6 +829,7 @@ function SelectionBar({
   onSave,
   onNote,
   onCopy,
+  onImage,
   onClose,
 }: {
   quote: string
@@ -822,6 +837,7 @@ function SelectionBar({
   onSave: () => void
   onNote: () => void
   onCopy: () => void
+  onImage: () => void
   onClose: () => void
 }) {
   const btn =
@@ -854,7 +870,7 @@ function SelectionBar({
             {count} {count === 1 ? 'word' : 'words'} · drag while holding, or tap another word to extend
           </p>
         )}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           <button onClick={onSave} className={cn(btn, 'bg-primary text-white hover:bg-[#1a8cd8]')}>
             <Highlighter className="size-5" />
             Save quote
@@ -866,6 +882,10 @@ function SelectionBar({
           <button onClick={onCopy} className={cn(btn, 'bg-secondary hover:bg-accent')}>
             <Copy className="size-5" />
             Copy
+          </button>
+          <button onClick={onImage} className={cn(btn, 'bg-secondary hover:bg-accent')}>
+            <ImageIcon className="size-5" />
+            Image
           </button>
         </div>
       </div>

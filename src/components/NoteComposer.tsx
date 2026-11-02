@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { ImageIcon, X } from 'lucide-react'
 import { Dialog } from 'radix-ui'
 
 import { BookAvatar } from '@/components/BookAvatar'
@@ -27,19 +27,22 @@ export function NoteComposer({
   onClose,
   onSave,
   onDelete,
+  onImage,
 }: {
   draft: Draft | null
   author: Author
   onClose: () => void
   onSave: (text: string) => void
   onDelete: () => void
+  /** Opens the quote as a shareable picture. */
+  onImage: (quote: string) => void
 }) {
   return (
     <Dialog.Root open={!!draft} onOpenChange={o => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=open]:fade-in-0 dark:bg-[rgba(91,112,131,0.4)]" />
         {/* keyed so each draft starts with its own text */}
-        {draft && <Body key={draft.note?.id ?? draft.post.i} {...{ draft, author, onSave, onDelete }} />}
+        {draft && <Body key={draft.note?.id ?? draft.post.i} {...{ draft, author, onSave, onDelete, onImage }} />}
       </Dialog.Portal>
     </Dialog.Root>
   )
@@ -50,11 +53,13 @@ function Body({
   author,
   onSave,
   onDelete,
+  onImage,
 }: {
   draft: Draft
   author: Author
   onSave: (text: string) => void
   onDelete: () => void
+  onImage: (quote: string) => void
 }) {
   const [text, setText] = useState(draft.note?.text ?? '')
   const quote = draft.note?.quote ?? draft.quote
@@ -78,6 +83,16 @@ function Body({
           <X className="size-5" />
         </Dialog.Close>
         <Dialog.Title className="flex-1 text-[17px] font-bold">{title}</Dialog.Title>
+        {quote && (
+          <button
+            onClick={() => onImage(quote)}
+            aria-label="Share as image"
+            title="Share as image"
+            className="grid size-9 place-items-center rounded-full hover:bg-accent"
+          >
+            <ImageIcon className="size-5" />
+          </button>
+        )}
         {draft.note && (
           <Button variant="ghost" className="rounded-full font-bold text-destructive hover:text-destructive" onClick={onDelete}>
             Delete
