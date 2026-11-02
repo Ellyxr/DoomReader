@@ -5,6 +5,27 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Windows 11 Widgets Board widgets (Edge). Drawn by public/widgets-sw.js from the Adaptive Card templates in
+// public/widgets; `update` redraws hourly so the streak notices a new day. Not in the plugin's manifest type yet.
+const widget = (tag: string, name: string, description: string) => ({
+  name,
+  short_name: name,
+  description,
+  tag,
+  ms_ac_template: `widgets/${tag}.json`,
+  data: `widgets/data/${tag}.json`,
+  type: 'application/json',
+  update: 3600,
+  // TODO: replace with real screenshots of each widget; the Widgets Board shows these in its picker
+  screenshots: [{ src: 'pwa-512x512.png', sizes: '512x512', label: name }],
+  icons: [{ src: 'pwa-192x192.png', sizes: '192x192' }],
+})
+const widgets = [
+  widget('streak', 'Reading streak', 'Your reading days this week.'),
+  widget('continue', 'Continue reading', 'The book you were reading, and how far in you are.'),
+  widget('post', 'Next post', 'The next post in your book, one at a time.'),
+]
+
 // `npm run preview` sends the same security headers as the Vercel deployment, so the CSP can be tested locally
 const vercel = JSON.parse(readFileSync(path.resolve(import.meta.dirname, 'vercel.json'), 'utf8'))
 const securityHeaders: Record<string, string> = Object.fromEntries(
@@ -46,10 +67,27 @@ export default defineConfig({
           },
         ],
         launch_handler: { client_mode: 'focus-existing' },
+        // long-press the app icon
+        shortcuts: [
+          {
+            name: 'Continue reading',
+            short_name: 'Continue',
+            url: './#/continue',
+            icons: [{ src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+          },
+          {
+            name: 'Scan a sync code',
+            short_name: 'Scan',
+            url: './#/scan',
+            icons: [{ src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+          },
+        ],
+        ...({ widgets } as object),
       },
       workbox: {
         // the pdf.js worker is ~1 MB; precache it so PDFs import offline
-        globPatterns: ['**/*.{js,mjs,css,html,svg,png,ico,webmanifest}'],
+        globPatterns: ['**/*.{js,mjs,css,html,svg,png,ico,webmanifest}', 'widgets/*.json'],
+        importScripts: ['widgets-sw.js'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // shortcut favicons, so the buttons keep their faces offline
         runtimeCaching: [

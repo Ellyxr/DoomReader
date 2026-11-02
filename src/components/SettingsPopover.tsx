@@ -6,12 +6,14 @@ import { toast } from 'sonner'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { setPref, usePrefs, type Prefs } from '@/hooks/prefs'
+import { clampSize, FONT_SIZE, setPref, usePrefs, type Prefs } from '@/hooks/prefs'
 import type { AutoScroll } from '@/hooks/useAutoScroll'
 import { downloadDictionary, useDictStatus } from '@/lib/dictionary'
 import { addCustomFont, FONT_ACCEPT, removeCustomFont, useCustomFont } from '@/lib/fonts'
+import { GOAL } from '@/lib/streak'
+import { canBadge } from '@/lib/widgets'
 
-type Choice = Exclude<keyof Prefs, 'define' | 'tabBook'>
+type Choice = Exclude<keyof Prefs, 'define' | 'tabBook' | 'size' | 'streakBadge'>
 type Option<K extends Choice> = [Prefs[K], string]
 
 const SECTIONS: { [K in Choice]: { title: string; options: Option<K>[] } } = {
@@ -29,14 +31,6 @@ const SECTIONS: { [K in Choice]: { title: string; options: Option<K>[] } } = {
       ['s', 'Short'],
       ['m', 'Medium'],
       ['l', 'Long'],
-    ],
-  },
-  size: {
-    title: 'Text size',
-    options: [
-      ['s', 'Small'],
-      ['m', 'Medium'],
-      ['l', 'Large'],
     ],
   },
   font: {
@@ -90,6 +84,64 @@ function Segmented<K extends Choice>({ k }: { k: K }) {
   const prefs = usePrefs()
   const { title, options } = SECTIONS[k]
   return <Pills title={title} options={options} value={prefs[k]} onChange={v => setPref(k, v)} />
+}
+
+/**
+ * Text size in px: a slider for big jumps, A buttons for one step at a time. The posts behind the popover change as it
+ * moves, so they are the preview.
+ */
+function TextSize() {
+  const { size } = usePrefs()
+  const set = (n: number) => setPref('size', clampSize(n))
+  const step = 'grid size-8 shrink-0 place-items-center rounded-full border font-bold hover:bg-accent disabled:opacity-40'
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between">
+        <h4 id="text-size" className="text-[13px] font-bold text-muted-foreground">
+          Text size
+        </h4>
+        <span className="text-[13px] text-muted-foreground tabular-nums">
+          {size !== FONT_SIZE.default && (
+            <>
+              <button className="font-bold text-primary hover:underline" onClick={() => set(FONT_SIZE.default)}>
+                Reset
+              </button>
+              {' · '}
+            </>
+          )}
+          {size}px
+        </span>
+      </div>
+      <div className="flex items-center gap-2.5">
+        <button
+          aria-label="Smaller text"
+          className={`${step} text-[12px]`}
+          disabled={size <= FONT_SIZE.min}
+          onClick={() => set(size - 1)}
+        >
+          A
+        </button>
+        <input
+          type="range"
+          min={FONT_SIZE.min}
+          max={FONT_SIZE.max}
+          value={size}
+          onChange={e => set(+e.target.value)}
+          aria-labelledby="text-size"
+          aria-valuetext={`${size} pixels`}
+          className="h-8 min-w-0 flex-1 cursor-pointer accent-primary"
+        />
+        <button
+          aria-label="Larger text"
+          className={`${step} text-[18px]`}
+          disabled={size >= FONT_SIZE.max}
+          onClick={() => set(size + 1)}
+        >
+          A
+        </button>
+      </div>
+    </div>
+  )
 }
 
 const AUTO_SCROLL: [AutoScroll, string][] = [
@@ -209,6 +261,23 @@ function TabBookSwitch() {
   )
 }
 
+/** Whether the streak shows on the installed app's icon. Only where the browser can badge icons. */
+function StreakBadgeSwitch() {
+  const { streakBadge } = usePrefs()
+  if (!canBadge()) return null
+  return (
+    <div>
+      <label className="flex cursor-pointer items-center justify-between gap-3">
+        <span className="text-[15px] leading-5">Show your streak on the app icon</span>
+        <Switch checked={streakBadge} onCheckedChange={on => setPref('streakBadge', on)} />
+      </label>
+      <p className="mt-1 text-[13px] leading-4 text-muted-foreground">
+        A day counts once you read {GOAL} posts. The number updates when you open DoomReader.
+      </p>
+    </div>
+  )
+}
+
 /**
  * The "Aa" button. The library shows the theme and the tab switch; the reader shows the reading settings, plus
  * auto-scroll when given one (it lasts only while the book is open, so it is not a saved pref).
@@ -242,7 +311,7 @@ export function SettingsPopover({
         {reader ? (
           <>
             <Segmented k="len" />
-            <Segmented k="size" />
+            <TextSize />
             <TypefacePicker />
             {autoScroll && onAutoScroll && (
               <Pills title="Auto-scroll" options={AUTO_SCROLL} value={autoScroll} onChange={onAutoScroll} />
@@ -259,7 +328,10 @@ export function SettingsPopover({
             )}
           </>
         ) : (
-          <TabBookSwitch />
+          <>
+            <TabBookSwitch />
+            <StreakBadgeSwitch />
+          </>
         )}
       </PopoverContent>
     </Popover>

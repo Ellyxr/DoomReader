@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Plus, ScanQrCode } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router'
 
 import { useImporter } from '@/components/Importer'
 import { ScanDialog } from '@/components/ScanDialog'
@@ -15,7 +16,14 @@ const EDGE = 'calc(max(16px, (100vw - 600px) / 2 + 16px) + env(safe-area-inset-r
  */
 export function Fab({ extras = true }: { extras?: boolean }) {
   const { pick } = useImporter()
-  const [scanning, setScanning] = useState(false)
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  // opened by the app icon's "Scan a sync code" shortcut
+  const [scanning, setScanning] = useState(pathname === '/scan')
+  const closeScan = () => {
+    setScanning(false)
+    if (pathname === '/scan') navigate('/', { replace: true })
+  }
   return (
     <>
       {extras && <Shortcuts />}
@@ -40,7 +48,7 @@ export function Fab({ extras = true }: { extras?: boolean }) {
       >
         <Plus className="size-[26px]" strokeWidth={2.2} />
       </button>
-      <ScanDialog open={scanning} onClose={() => setScanning(false)} />
+      <ScanDialog open={scanning} onClose={closeScan} />
     </>
   )
 }

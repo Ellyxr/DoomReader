@@ -1,0 +1,30 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "Container",
+      "$when": "${has}",
+      "items": [
+        { "type": "TextBlock", "text": "${title}", "weight": "Bolder", "wrap": false },
+        { "type": "TextBlock", "text": "${chapter} · ${where}", "size": "Small", "isSubtle": true, "spacing": "None", "wrap": false },
+        { "type": "TextBlock", "text": "${text}", "wrap": true, "maxLines": 8, "spacing": "Medium" }
+      ],
+      "selectAction": { "type": "Action.Execute", "verb": "continue" }
+    },
+    {
+      "type": "Container",
+      "$when": "${!has}",
+      "items": [
+        { "type": "TextBlock", "text": "Your next post shows up here", "size": "Large", "weight": "Bolder", "wrap": true },
+        { "type": "TextBlock", "text": "Open a book in DoomReader to fill this in.", "isSubtle": true, "wrap": true }
+      ]
+    }
+  ],
+  "actions": [
+    { "type": "Action.Execute", "verb": "continue", "title": "Keep reading", "$when": "${has}" },
+    { "type": "Action.Execute", "verb": "next", "title": "Next ›", "$when": "${has && hasNext}" },
+    { "type": "Action.Execute", "verb": "library", "title": "Open library", "$when": "${!has}" }
+  ]
+}

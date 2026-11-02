@@ -23,8 +23,11 @@ import { Input } from '@/components/ui/input'
 import { useInstallPrompt } from '@/hooks/useInstallPrompt'
 import { deleteBook, getState, listBooks, onLibraryChange, requestPersistence, storageInfo, type StorageInfo } from '@/lib/db'
 import { hash } from '@/lib/parse/html'
+import { GOAL, useStreak } from '@/lib/streak'
 import type { SyncPayload } from '@/lib/sync'
 import type { BookMeta } from '@/lib/types'
+import { cn } from '@/lib/utils'
+import { publishLibrary } from '@/lib/widgets'
 
 const FORMAT = { epub: 'EPUB', pdf: 'PDF', sample: 'Sample' } as const
 
@@ -190,6 +193,55 @@ function BackupCard({ busy, onBackUp, onRestore }: { busy: boolean; onBackUp: ()
   )
 }
 
+const dayName = new Intl.DateTimeFormat(undefined, { weekday: 'long' })
+
+/** The last seven days, today last: a full dot for each day that counted, today filling up as posts are read. */
+function StreakStrip() {
+  const { count, today, week } = useStreak()
+  if (!week.some(d => d.posts)) return null
+  const left = Math.max(0, GOAL - today)
+  const sub = !left
+    ? 'Today counts.'
+    : today
+      ? `${left} more ${left === 1 ? 'post' : 'posts'} today`
+      : count
+        ? `Read ${GOAL} posts today to keep it going`
+        : `Read ${GOAL} posts in a day to start a streak`
+  return (
+    <section aria-label="Reading streak" className="flex items-center gap-4 border-b py-3 px-safe">
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-bold">{count ? `${count}-day streak` : 'No streak yet'}</div>
+        <div className="truncate text-[13px] leading-4 text-muted-foreground">{sub}</div>
+      </div>
+      <ol className="flex shrink-0 gap-2">
+        {week.map(d => (
+          <li key={d.key} className="grid justify-items-center gap-1">
+            <span
+              className={cn('size-3.5 rounded-full', d.met ? 'bg-primary' : 'bg-secondary', d.today && 'ring-1 ring-border')}
+              // today fills like a clock as posts are read
+              style={
+                d.today && !d.met && d.posts
+                  ? { background: `conic-gradient(var(--primary) ${(d.posts / GOAL) * 360}deg, var(--secondary) 0)` }
+                  : undefined
+              }
+            />
+            <span
+              aria-hidden
+              className={cn('text-[11px] leading-none text-muted-foreground', d.today && 'font-bold text-foreground')}
+            >
+              {d.label}
+            </span>
+            <span className="sr-only">
+              {d.today ? 'Today' : dayName.format(new Date(`${d.key}T00:00`))}:{' '}
+              {d.met ? 'counted' : `${d.posts} of ${GOAL} posts`}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
+
 function StorageFooter({
   info,
   onPersist,
@@ -245,7 +297,10 @@ export default function Library() {
   const backup = useBackup()
 
   const refresh = useCallback(() => {
-    void listBooks().then(setBooks)
+    void listBooks().then(b => {
+      setBooks(b)
+      publishLibrary(b)
+    })
     void storageInfo().then(setInfo)
   }, [])
   useEffect(() => {
@@ -332,6 +387,7 @@ export default function Library() {
             </Button>
           </div>
         )}
+        {!!books?.length && !query && <StreakStrip />}
         {shown?.map(b => <BookRow key={b.id} book={b} onDelete={setToDelete} onSync={b => void openSync(b)} />)}
         {shown && books && books.length > 0 && !shown.length && (
           <p className="px-safe py-8 text-center text-muted-foreground">No books match "{query}".</p>

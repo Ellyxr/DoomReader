@@ -1,0 +1,25 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    { "type": "TextBlock", "text": "${headline}", "size": "Large", "weight": "Bolder", "wrap": true },
+    { "type": "TextBlock", "text": "${subline}", "isSubtle": true, "spacing": "None", "wrap": true },
+    {
+      "type": "ColumnSet",
+      "spacing": "Large",
+      "columns": [
+        {
+          "$data": "${week}",
+          "type": "Column",
+          "width": "stretch",
+          "items": [
+            { "type": "TextBlock", "text": "${mark}", "size": "ExtraLarge", "color": "${color}", "horizontalAlignment": "Center" },
+            { "type": "TextBlock", "text": "${label}", "size": "Small", "weight": "${weight}", "isSubtle": true, "spacing": "None", "horizontalAlignment": "Center" }
+          ]
+        }
+      ]
+    }
+  ],
+  "selectAction": { "type": "Action.Execute", "verb": "continue" }
+}

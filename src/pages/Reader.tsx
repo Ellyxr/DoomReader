@@ -50,9 +50,11 @@ import {
 } from '@/lib/feed'
 import { segOfQuote } from '@/lib/highlight'
 import { inBookOrder, insertByBook, moved, sortByBook } from '@/lib/notes'
+import { GOAL, notePostRead } from '@/lib/streak'
 import { takePendingSync, type SyncPayload } from '@/lib/sync'
 import type { BookMeta, Chapter, Note } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { publishReading } from '@/lib/widgets'
 
 type Tab = 'feed' | 'chapters' | 'saved' | 'notes' | 'search'
 const TABS: [Tab, string][] = [
@@ -116,7 +118,10 @@ function NotFound() {
     <div className="mx-auto min-h-screen max-w-[600px] min-[601px]:border-x">
       <div className="mx-auto max-w-[420px] px-8 py-12">
         <h3 className="mb-2 text-[31px] leading-[1.1] font-extrabold tracking-tight">This book isn't here</h3>
-        <p className="mb-5 text-muted-foreground">It may have been deleted, or this browser's data was cleared.</p>
+        <p className="mb-5 text-muted-foreground">
+          It may have been deleted, or this browser's data was cleared. If this link came from another device, it only
+          works there: open the book on that device and choose Aa → Continue on another device instead.
+        </p>
         <Button asChild className="rounded-full font-bold">
           <Link to="/">Back to library</Link>
         </Button>
@@ -181,14 +186,14 @@ function Feed({
   const feedY = useRef(0)
 
   // latest values for callbacks that must stay stable (so memoized posts don't re-render)
-  const live = useRef({ posts, cur, likes, marks, notes, tab, meta, segs })
+  const live = useRef({ posts, cur, likes, marks, notes, tab, meta, segs, chapters })
   useLayoutEffect(() => {
-    live.current = { posts, cur, likes, marks, notes, tab, meta, segs }
+    live.current = { posts, cur, likes, marks, notes, tab, meta, segs, chapters }
   })
 
   /* ---------- saving ---------- */
   const persist = useCallback(() => {
-    const { posts, cur, likes, marks, notes, meta, segs } = live.current
+    const { posts, cur, likes, marks, notes, meta, segs, chapters } = live.current
     const p = posts[cur]
     if (!p) return
     const custom = !inBookOrder(notes, segs)
@@ -196,6 +201,12 @@ function Feed({
       { id: meta.id, seg: p.s, likes: [...likes], marks: [...marks], notes, ...(custom ? { notesCustom: true } : {}) },
       p.pct,
     )
+    publishReading(meta, posts, cur, ch => chapters[ch]?.title ?? '')
+  }, [])
+  // opening a book is enough to make it the widgets' book
+  useEffect(() => {
+    const { meta, posts, cur, chapters } = live.current
+    publishReading(meta, posts, cur, ch => chapters[ch]?.title ?? '')
   }, [])
   const saveTimer = useRef(0)
   const saveSoon = useCallback(() => {
@@ -267,6 +278,20 @@ function Feed({
     return () => io.disconnect()
   }, [])
 
+  // the furthest passage reached this visit, by segment so a new post length doesn't recount; each step past it counts
+  // toward today's streak
+  const furthest = useRef(saved.seg)
+  const countRead = useCallback((i: number) => {
+    const s = live.current.posts[i]?.s ?? -1
+    if (s <= furthest.current) return
+    furthest.current = s
+    const made = notePostRead()
+    if (made)
+      toast(made.count > 1 ? `${made.count}-day streak` : 'Streak started', {
+        description: `You read ${GOAL} posts today.`,
+      })
+  }, [])
+
   // which post is under the header
   useEffect(() => {
     let ticking = false
@@ -280,6 +305,7 @@ function Feed({
       if (i !== live.current.cur) {
         setCur(i)
         saveSoon()
+        countRead(i)
       }
     }
     const onScroll = () => {
@@ -289,7 +315,7 @@ function Feed({
     }
     addEventListener('scroll', onScroll, { passive: true })
     return () => removeEventListener('scroll', onScroll)
-  }, [saveSoon])
+  }, [saveSoon, countRead])
 
   // a new post length regroups posts: stay on the same passage
   const prevPosts = useRef(posts)

@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { syncCodeFrom } from '@/lib/sync'
+import { readLinkFrom, syncCodeFrom } from '@/lib/sync'
 
 /** The browser's own QR reader, where there is one (Chrome on Android and macOS). Not in TypeScript's DOM types yet. */
 declare class BarcodeDetector {
@@ -42,6 +42,15 @@ async function makeReader(): Promise<Read> {
 
 type Camera = { k: 'starting' } | { k: 'on' } | { k: 'denied' } | { k: 'none' }
 
+/** Why a scanned or pasted text was refused: a link to a book's page (no place in it), or something else. */
+type Wrong = 'read' | 'other' | null
+
+const WHY: Record<'read' | 'other', string> = {
+  read: "That's a link to the book, not a sync link, so it doesn't carry your place. Use Continue on another device instead.",
+  other: "That isn't a DoomReader sync link.",
+}
+const wrongFor = (text: string): Wrong => (readLinkFrom(text) ? 'read' : 'other')
+
 /** Scanning a sync QR code with the camera, or pasting the link, to pick up a book where another device left it. */
 export function ScanDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
@@ -63,9 +72,9 @@ function Scanner({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate()
   const video = useRef<HTMLVideoElement>(null)
   const [camera, setCamera] = useState<Camera>({ k: 'starting' })
-  const [wrong, setWrong] = useState(false)
+  const [wrong, setWrong] = useState<Wrong>(null)
   const [pasted, setPasted] = useState('')
-  const [pasteError, setPasteError] = useState(false)
+  const [pasteError, setPasteError] = useState<Wrong>(null)
 
   const go = (code: string) => {
     onClose()
@@ -104,7 +113,7 @@ function Scanner({ onClose }: { onClose: () => void }) {
           // some other QR code: say so once, and keep looking
           if (text && text !== lastWrong) {
             lastWrong = text
-            setWrong(true)
+            setWrong(wrongFor(text))
           }
         }
         timer = window.setTimeout(tick, 200)
@@ -122,7 +131,7 @@ function Scanner({ onClose }: { onClose: () => void }) {
     e.preventDefault()
     const code = syncCodeFrom(pasted)
     if (code) go(code)
-    else setPasteError(true)
+    else setPasteError(wrongFor(pasted))
   }
 
   return (
@@ -152,8 +161,8 @@ function Scanner({ onClose }: { onClose: () => void }) {
           </p>
         )}
         {wrong && camera.k === 'on' && (
-          <p className="absolute inset-x-3 bottom-3 rounded-full bg-black/70 px-3 py-1.5 text-center text-[13px] text-white">
-            That QR code isn't a DoomReader sync code.
+          <p className="absolute inset-x-3 bottom-3 rounded-2xl bg-black/70 px-3 py-1.5 text-center text-[13px] text-white">
+            {wrong === 'read' ? WHY.read : "That QR code isn't a DoomReader sync code."}
           </p>
         )}
       </div>
@@ -164,18 +173,18 @@ function Scanner({ onClose }: { onClose: () => void }) {
             value={pasted}
             onChange={e => {
               setPasted(e.target.value)
-              setPasteError(false)
+              setPasteError(null)
             }}
             placeholder="Or paste a sync link"
             aria-label="Sync link"
-            aria-invalid={pasteError || undefined}
+            aria-invalid={!!pasteError || undefined}
             className="rounded-full"
           />
           <Button type="submit" className="rounded-full font-bold" disabled={!pasted.trim()}>
             Open
           </Button>
         </div>
-        {pasteError && <p className="px-3 text-[13px] text-destructive">That isn't a DoomReader sync link.</p>}
+        {pasteError && <p className="px-3 text-[13px] leading-4 text-destructive">{WHY[pasteError]}</p>}
       </form>
     </>
   )

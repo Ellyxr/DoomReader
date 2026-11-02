@@ -6,7 +6,8 @@ export type Theme = 'light' | 'dark' | 'system'
 
 export interface Prefs {
   len: PostLength
-  size: 's' | 'm' | 'l'
+  /** Reading text size in px, FONT_SIZE.min–max. */
+  size: number
   /** 'custom' is a font the reader uploaded (lib/fonts). */
   font: 'sans' | 'serif' | 'custom'
   theme: Theme
@@ -14,15 +15,29 @@ export interface Prefs {
   define: boolean
   /** The browser tab takes the title and cover of the book read last. */
   tabBook: boolean
+  /** The reading streak shows as a number on the installed app's icon. */
+  streakBadge: boolean
 }
 
 // Must match public/theme.js, which applies the theme before first paint.
 const KEY = 'doomreader:prefs'
-const DEFAULTS: Prefs = { len: 'm', size: 'm', font: 'sans', theme: 'system', define: false, tabBook: true }
+export const FONT_SIZE = { min: 13, max: 26, default: 17 }
+const DEFAULTS: Prefs = { len: 'm', size: FONT_SIZE.default, font: 'sans', theme: 'system', define: false, tabBook: true, streakBadge: false }
+
+/** Sizes were once Small / Medium / Large; those carry over as the px they stood for. */
+const LEGACY_SIZE: Record<string, number> = { s: 15, m: 17, l: 20 }
+
+export const clampSize = (n: unknown) => {
+  const v = typeof n === 'string' ? LEGACY_SIZE[n] : n
+  return typeof v === 'number' && Number.isFinite(v)
+    ? Math.min(FONT_SIZE.max, Math.max(FONT_SIZE.min, Math.round(v)))
+    : FONT_SIZE.default
+}
 
 function load(): Prefs {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') }
+    const p = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') }
+    return { ...p, size: clampSize(p.size) }
   } catch {
     return DEFAULTS
   }
@@ -39,7 +54,7 @@ function apply() {
   const theme = resolved()
   html.classList.toggle('dark', theme === 'dark')
   html.style.colorScheme = theme
-  html.dataset.size = prefs.size
+  html.style.setProperty('--fs', `${prefs.size}px`)
   html.dataset.font = prefs.font
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff')
 }

@@ -1,0 +1,38 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "Container",
+      "$when": "${has}",
+      "items": [
+        { "type": "TextBlock", "text": "Continue reading", "size": "Small", "isSubtle": true },
+        { "type": "TextBlock", "text": "${title}", "size": "Large", "weight": "Bolder", "wrap": true, "maxLines": 2, "spacing": "None" },
+        { "type": "TextBlock", "text": "${author}", "isSubtle": true, "spacing": "None", "$when": "${author != ''}" },
+        {
+          "type": "ColumnSet",
+          "spacing": "Medium",
+          "columns": [
+            { "type": "Column", "width": "${done}", "style": "accent", "minHeight": "6px", "items": [], "$when": "${done > 0}" },
+            { "type": "Column", "width": "${left}", "style": "emphasis", "minHeight": "6px", "items": [], "$when": "${left > 0}" }
+          ]
+        },
+        { "type": "TextBlock", "text": "${pct}% read", "size": "Small", "isSubtle": true, "spacing": "Small" }
+      ]
+    },
+    {
+      "type": "Container",
+      "$when": "${!has}",
+      "items": [
+        { "type": "TextBlock", "text": "Nothing open yet", "size": "Large", "weight": "Bolder", "wrap": true },
+        { "type": "TextBlock", "text": "Open a book in DoomReader and it will wait for you here.", "isSubtle": true, "wrap": true }
+      ]
+    }
+  ],
+  "actions": [
+    { "type": "Action.Execute", "verb": "continue", "title": "Keep reading", "$when": "${has}" },
+    { "type": "Action.Execute", "verb": "library", "title": "Open library", "$when": "${!has}" }
+  ],
+  "selectAction": { "type": "Action.Execute", "verb": "continue" }
+}

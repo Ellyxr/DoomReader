@@ -65,10 +65,16 @@ export function syncLink(code: string) {
 
 /**
  * The code inside a sync link (from a QR code or pasted), or null for anything else. Only the code is kept: the app
- * moves to its own sync page and never opens a link it was handed.
+ * moves to its own sync page and never opens a link it was handed. The link may sit anywhere in the text, since share
+ * sheets and chat apps add a title around it, punctuation after it, or write "#" as "%23".
  */
 export function syncCodeFrom(text: string) {
-  return /#\/sync\/([zj][\w-]+)\s*$/.exec(text.trim())?.[1] ?? null
+  return /(?:#|%23)\/sync\/([zj][\w-]+)/i.exec(text)?.[1] ?? null
+}
+
+/** The book id in a link to a book's page (#/read/…), which opens the book but carries no place. */
+export function readLinkFrom(text: string) {
+  return /(?:#|%23)\/read\/([\w-]{1,128})/i.exec(text)?.[1] ?? null
 }
 
 /** Reads a link's code back, treating it as untrusted. Returns null for anything that isn't a valid sync link. */

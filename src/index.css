@@ -66,12 +66,6 @@
   --pop-shadow: 0 0 15px rgba(255, 255, 255, 0.18), 0 0 3px rgba(255, 255, 255, 0.12);
 }
 
-html[data-size='s'] {
-  --fs: 15px;
-}
-html[data-size='l'] {
-  --fs: 19.5px;
-}
 html[data-font='serif'] {
   --font-read: Charter, 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
 }
