@@ -17,12 +17,14 @@ export interface Prefs {
   tabBook: boolean
   /** The reading streak shows as a number on the installed app's icon. */
   streakBadge: boolean
+  /** The start screen's tab: a preview of each book being read, or the whole library. */
+  view: 'home' | 'library'
 }
 
 // Must match public/theme.js, which applies the theme before first paint.
 const KEY = 'doomreader:prefs'
 export const FONT_SIZE = { min: 13, max: 26, default: 17 }
-const DEFAULTS: Prefs = { len: 'm', size: FONT_SIZE.default, font: 'sans', theme: 'system', define: false, tabBook: true, streakBadge: false }
+const DEFAULTS: Prefs = { len: 'm', size: FONT_SIZE.default, font: 'sans', theme: 'system', define: false, tabBook: true, streakBadge: false, view: 'home' }
 
 /** Sizes were once Small / Medium / Large; those carry over as the px they stood for. */
 const LEGACY_SIZE: Record<string, number> = { s: 15, m: 17, l: 20 }

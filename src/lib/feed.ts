@@ -216,6 +216,9 @@ export function bodyHtml(p: Post) {
   return out
 }
 
+/** What Home shows for a book at post `p` (types PostPreview). */
+export const previewOf = (p: Post, chapter: string) => ({ seg: p.s, html: bodyHtml(p), chapter, pct: p.pct })
+
 export const plainText = (p: Post) =>
   p.segs
     .filter(s => s.k !== 't' && s.k !== 'i')

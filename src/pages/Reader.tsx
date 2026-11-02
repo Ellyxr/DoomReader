@@ -24,7 +24,16 @@ import { PinIcon } from '@/components/icons'
 import { useImporter } from '@/components/Importer'
 import { NoteComposer, type Draft } from '@/components/NoteComposer'
 import { Podcast } from '@/components/Podcast'
-import { ago, PostCard, PostShell, QuoteMark, YouAvatar, type Author, type PostAction } from '@/components/PostCard'
+import {
+  ago,
+  handleOf,
+  PostCard,
+  PostShell,
+  QuoteMark,
+  YouAvatar,
+  type Author,
+  type PostAction,
+} from '@/components/PostCard'
 import { SettingsPopover } from '@/components/SettingsPopover'
 import { SyncDialog } from '@/components/SyncDialog'
 import { Button } from '@/components/ui/button'
@@ -43,12 +52,14 @@ import {
   isOn,
   plainText,
   postIndexOfSeg,
+  previewOf,
   searchBook,
   toggled,
   type Post,
   type Segment,
 } from '@/lib/feed'
 import { segOfQuote } from '@/lib/highlight'
+import { bookShown } from '@/lib/morph'
 import { inBookOrder, insertByBook, moved, sortByBook } from '@/lib/notes'
 import { GOAL, notePostRead } from '@/lib/streak'
 import { takePendingSync, type SyncPayload } from '@/lib/sync'
@@ -163,7 +174,7 @@ function Feed({
     () => ({
       title: meta.title,
       avatar: meta.avatar,
-      handle: '@' + (meta.author.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 15) || 'reader'),
+      handle: handleOf(meta.author),
       book: meta.id,
     }),
     [meta],
@@ -200,6 +211,7 @@ function Feed({
     void saveState(
       { id: meta.id, seg: p.s, likes: [...likes], marks: [...marks], notes, ...(custom ? { notesCustom: true } : {}) },
       p.pct,
+      previewOf(p, chapters[p.ch]?.title ?? ''),
     )
     publishReading(meta, posts, cur, ch => chapters[ch]?.title ?? '')
   }, [])
@@ -257,6 +269,12 @@ function Feed({
     if (p.i === 0) scrollTo(0, 0)
     else scrollTo({ top: el.getBoundingClientRect().top + scrollY - headerOffset() + 1, behavior: 'auto' })
   }, [rendered, posts, tab])
+
+  // the saved post is in place now: a Home preview opening this book can grow into it (lib/morph)
+  useLayoutEffect(() => {
+    const { meta, cur } = live.current
+    bookShown(meta.id, feedRef.current?.children[cur])
+  }, [])
 
   // keep rendering ahead of the viewport, like the original's sentinel loop
   useEffect(() => {

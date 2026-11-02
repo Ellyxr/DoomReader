@@ -15,6 +15,7 @@ import { Link } from 'react-router'
 import { toast } from 'sonner'
 
 import { Fab } from '@/components/Fab'
+import { Home, inProgress } from '@/components/Home'
 import { useImporter } from '@/components/Importer'
 import { SettingsPopover } from '@/components/SettingsPopover'
 import { SyncDialog } from '@/components/SyncDialog'
@@ -31,6 +32,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { setPref, usePrefs } from '@/hooks/prefs'
 import { useInstallPrompt } from '@/hooks/useInstallPrompt'
 import {
   deleteBook,
@@ -336,6 +338,38 @@ function StreakStrip() {
   )
 }
 
+const TABS = [
+  ['home', 'Home'],
+  ['library', 'Library'],
+] as const
+
+/** Home and Library, as tabs under the header. The last one picked is where the app opens. */
+function ViewTabs() {
+  const { view } = usePrefs()
+  return (
+    <div role="tablist" aria-label="View" className="flex">
+      {TABS.map(([v, label]) => (
+        <button
+          key={v}
+          role="tab"
+          aria-selected={view === v}
+          onClick={() => {
+            setPref('view', v)
+            scrollTo(0, 0)
+          }}
+          className={cn(
+            'relative flex-1 py-3.5 text-[15px] font-medium text-muted-foreground transition-colors hover:bg-accent',
+            view === v && 'font-bold text-foreground',
+          )}
+        >
+          {label}
+          {view === v && <i className="absolute bottom-0 left-1/2 h-1 w-14 -translate-x-1/2 rounded-full bg-primary" />}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function StorageFooter({
   info,
   onPersist,
@@ -390,6 +424,9 @@ export default function Library() {
     setSyncing({ id: b.id, title: b.title, pct: b.progress, state })
   }
   const backup = useBackup()
+  const { view } = usePrefs()
+  // with no books there is nothing to preview: the library's own empty state says what to do
+  const home = view === 'home' && !!books?.length
 
   const refresh = useCallback(() => {
     void listBooks().then(b => {
@@ -425,9 +462,13 @@ export default function Library() {
             d
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[17px] leading-[22px] font-extrabold">Library</div>
+            <div className="truncate text-[17px] leading-[22px] font-extrabold">{home ? 'Home' : 'Library'}</div>
             <div className="truncate text-[13px] leading-4 text-muted-foreground tabular-nums">
-              {books ? `${books.length} ${books.length === 1 ? 'book' : 'books'}` : ' '}
+              {!books
+                ? ' '
+                : home
+                  ? `${books.filter(inProgress).length} in progress`
+                  : `${books.length} ${books.length === 1 ? 'book' : 'books'}`}
             </div>
           </div>
           {install && (
@@ -456,7 +497,8 @@ export default function Library() {
           </DropdownMenu>
           <SettingsPopover />
         </div>
-        {books && books.length > 3 && (
+        {!!books?.length && <ViewTabs />}
+        {!home && books && books.length > 3 && (
           <div className="relative pb-3 px-safe">
             <Search className="pointer-events-none absolute top-2.5 left-[max(28px,calc(env(safe-area-inset-left,0px)+12px))] size-4 text-muted-foreground" />
             <Input
@@ -482,18 +524,32 @@ export default function Library() {
             </Button>
           </div>
         )}
-        {!!books?.length && !query && <StreakStrip />}
-        {shown?.map(b => (
-          <BookRow key={b.id} book={b} onDelete={setToDelete} onSync={b => void openSync(b)} onRename={setToRename} />
-        ))}
-        {shown && books && books.length > 0 && !shown.length && (
-          <p className="px-safe py-8 text-center text-muted-foreground">No books match "{query}".</p>
+        {!!books?.length && (home || !query) && <StreakStrip />}
+        {home && books ? (
+          <Home books={books} onLibrary={() => setPref('view', 'library')} />
+        ) : (
+          <>
+            {shown?.map(b => (
+              <BookRow
+                key={b.id}
+                book={b}
+                onDelete={setToDelete}
+                onSync={b => void openSync(b)}
+                onRename={setToRename}
+              />
+            ))}
+            {shown && books && books.length > 0 && !shown.length && (
+              <p className="px-safe py-8 text-center text-muted-foreground">No books match "{query}".</p>
+            )}
+            <StorageFooter
+              info={info}
+              onPersist={persist}
+              backup={
+                <BackupCard busy={backup.busy} onBackUp={() => void backup.backUp()} onRestore={backup.pickRestore} />
+              }
+            />
+          </>
         )}
-        <StorageFooter
-          info={info}
-          onPersist={persist}
-          backup={<BackupCard busy={backup.busy} onBackUp={() => void backup.backUp()} onRestore={backup.pickRestore} />}
-        />
         {backup.field}
       </main>
 

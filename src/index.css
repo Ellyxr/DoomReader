@@ -255,3 +255,13 @@ html:not(.touch-ui) .touch-only {
     background-color: color-mix(in srgb, var(--primary) 8%, transparent);
   }
 }
+
+/* a Home preview growing into its post in the book (lib/morph): eases out, the rest of the page crossfades */
+::view-transition-group(opening-post) {
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 260ms;
+}

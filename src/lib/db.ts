@@ -1,6 +1,6 @@
 import { openDB, type DBSchema } from 'idb'
 
-import type { BookImage, BookMeta, Chapter, ReadingState } from '@/lib/types'
+import type { BookImage, BookMeta, Chapter, PostPreview, ReadingState } from '@/lib/types'
 
 /**
  * Everything lives in this browser's IndexedDB. Nothing leaves the device; the library is gone only
@@ -107,15 +107,27 @@ export async function putState(state: ReadingState) {
   await (await dbp).put('state', state)
 }
 
-/** Saves the reading position and marks, and the progress shown in the library. */
-export async function saveState(state: ReadingState, progress: number) {
+/** Saves the reading position and marks, and the progress (and Home preview) shown in the library. */
+export async function saveState(state: ReadingState, progress: number, preview?: PostPreview | null) {
   const db = await dbp
   const tx = db.transaction(['books', 'state'], 'readwrite')
   const books = tx.objectStore('books')
   const meta = await books.get(state.id)
   await tx.objectStore('state').put(state)
-  if (meta) await books.put({ ...meta, progress, openedAt: Date.now() })
+  if (meta) {
+    // null: the place moved without the reader (a sync link), so the old preview is wrong
+    const { preview: old, ...rest } = meta
+    const next = preview === undefined ? old : preview
+    await books.put({ ...rest, progress, openedAt: Date.now(), ...(next ? { preview: next } : {}) })
+  }
   await tx.done
+}
+
+/** Fills in a Home preview for a book read before previews were kept. Leaves the order of the library alone. */
+export async function setPreview(id: string, preview: PostPreview) {
+  const db = await dbp
+  const meta = await db.get('books', id)
+  if (meta) await db.put('books', { ...meta, preview })
 }
 
 export const MAX_TITLE = 500

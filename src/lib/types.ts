@@ -54,6 +54,17 @@ export interface BookMeta {
   openedAt: number | null
   /** 0–100, updated as the book is read. */
   progress: number
+  /** The post the reader is at, saved with the place, so Home can show it without loading the book. */
+  preview?: PostPreview
+}
+
+export interface PostPreview {
+  /** The post's first segment, to tell whether the preview is still the reader's place. */
+  seg: number
+  /** Its text as the reader draws it (lib/feed bodyHtml), pictures left out. */
+  html: string
+  chapter: string
+  pct: number
 }
 
 /** A reply to a post. With `quote` it is a quote post: the highlighted words plus the reader's comment. */

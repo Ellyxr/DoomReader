@@ -13,7 +13,7 @@ import { addCustomFont, FONT_ACCEPT, removeCustomFont, useCustomFont } from '@/l
 import { GOAL } from '@/lib/streak'
 import { canBadge } from '@/lib/widgets'
 
-type Choice = Exclude<keyof Prefs, 'define' | 'tabBook' | 'size' | 'streakBadge'>
+type Choice = Exclude<keyof Prefs, 'define' | 'tabBook' | 'size' | 'streakBadge' | 'view'>
 type Option<K extends Choice> = [Prefs[K], string]
 
 const SECTIONS: { [K in Choice]: { title: string; options: Option<K>[] } } = {

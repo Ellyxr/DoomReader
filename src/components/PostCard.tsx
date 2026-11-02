@@ -18,6 +18,9 @@ export interface Author {
 
 export type PostAction = 'like' | 'mark' | 'share' | 'reply'
 
+/** A book's @handle, made from its author. */
+export const handleOf = (author: string) => '@' + (author.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 15) || 'reader')
+
 export function ago(t: number) {
   const m = Math.round((Date.now() - t) / 60000)
   if (m < 1) return 'now'

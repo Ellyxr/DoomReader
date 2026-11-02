@@ -97,7 +97,7 @@ export async function decodeSync(code: string): Promise<SyncPayload | null> {
 /** Moves this device to the link's place, combining likes, bookmarks and notes with the ones already here. */
 export async function applySync({ id, pct, state }: SyncPayload) {
   const here = await getState(id)
-  await saveState({ ...mergeState(here, state), seg: state.seg }, pct)
+  await saveState({ ...mergeState(here, state), seg: state.seg }, pct, null)
 }
 
 /* ---------- a link opened before its book was added: applied the next time the book opens ---------- */
