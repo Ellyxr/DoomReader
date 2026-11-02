@@ -265,3 +265,24 @@ html:not(.touch-ui) .touch-only {
 ::view-transition-new(root) {
   animation-duration: 260ms;
 }
+
+/* Home previews: a cut-off post fades at the bottom; opened, it grows to its full height and the fade melts away */
+@property --fade {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+.preview-text {
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--fade)), transparent);
+  transition:
+    max-height 460ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    --fade 320ms ease-out;
+}
+.preview-text[data-clipped] {
+  --fade: 4em;
+}
+@media (prefers-reduced-motion: reduce) {
+  .preview-text {
+    transition: none;
+  }
+}

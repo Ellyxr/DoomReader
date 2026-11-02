@@ -7,14 +7,15 @@ import { ago, handleOf, PostShell } from '@/components/PostCard'
 import { Button } from '@/components/ui/button'
 import { usePrefs } from '@/hooks/prefs'
 import { getBook, getState, setPreview } from '@/lib/db'
-import { openWithMorph } from '@/lib/morph'
+import { leaveHome, openWithMorph } from '@/lib/morph'
 import type { BookMeta, PostPreview } from '@/lib/types'
-import { cn } from '@/lib/utils'
 
-/** Holding a preview this long opens it out in place, to read more of it without leaving Home. */
+/** Holding a preview this long goes into the book. */
 const HOLD_MS = 450
 /** A finger that moves this far is scrolling, not holding. */
 const SLOP_PX = 10
+
+const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
 export const inProgress = (b: BookMeta) => !!b.openedAt && b.progress < 100
 
@@ -34,24 +35,36 @@ async function makePreview(b: BookMeta, len: ReturnType<typeof usePrefs>['len'])
 }
 
 /**
- * One book's next post. Tap it to open the book there, the card growing into the post (lib/morph); hold it to open it
- * out here and read the rest of the post first.
+ * One book's next post. A tap opens the rest of the post out downward, in place; a second tap, or holding it, goes into
+ * the book there (onEnter). A post short enough to show whole goes straight in.
  */
-function PreviewCard({ book, preview }: { book: BookMeta; preview: PostPreview | null }) {
-  const navigate = useNavigate()
+function PreviewCard({
+  book,
+  preview,
+  onEnter,
+}: {
+  book: BookMeta
+  preview: PostPreview | null
+  onEnter: (card: HTMLElement) => void
+}) {
   const card = useRef<HTMLElement>(null)
   const text = useRef<HTMLDivElement>(null)
-  const [open, setOpen] = useState(false)
   const [clipped, setClipped] = useState(false)
+  /** Opened out: the full height it grows to, then 'all' once it has (so a new text size still fits). */
+  const [open, setOpen] = useState<number | 'all' | null>(null)
   const hold = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null)
 
   useLayoutEffect(() => {
     const el = text.current
-    if (el && !open) setClipped(el.scrollHeight > el.clientHeight + 1)
+    if (el && open === null) setClipped(el.scrollHeight > el.clientHeight + 1)
   }, [preview, open])
 
-  const go = () => {
-    if (card.current) openWithMorph(card.current, book.id, () => navigate(`/read/${book.id}`))
+  const enter = () => card.current && onEnter(card.current)
+  const tap = () => {
+    if (clipped && open === null && text.current) {
+      setOpen(text.current.scrollHeight)
+      if (still()) setOpen('all')
+    } else enter()
   }
   const endHold = () => {
     if (hold.current) clearTimeout(hold.current.timer)
@@ -60,9 +73,11 @@ function PreviewCard({ book, preview }: { book: BookMeta; preview: PostPreview |
   return (
     <PostShell
       ref={card}
+      data-home-card
       role="link"
       tabIndex={0}
-      aria-label={`Continue ${book.title} at ${preview?.pct ?? book.progress}%`}
+      aria-label={`${book.title}, ${preview?.pct ?? book.progress}%. ${clipped && open === null ? 'Tap to read the whole post' : 'Tap to keep reading'}`}
+      aria-expanded={clipped ? open !== null : undefined}
       author={{ title: book.title, handle: handleOf(book.author) }}
       avatar={<BookAvatar title={book.title} avatar={book.avatar} />}
       time={book.openedAt ? ago(book.openedAt) : undefined}
@@ -75,7 +90,7 @@ function PreviewCard({ book, preview }: { book: BookMeta; preview: PostPreview |
       className="cursor-pointer select-none [-webkit-touch-callout:none]"
       onPointerDown={e => {
         hold.current = null
-        if (e.button !== 0 || (!clipped && !open)) return
+        if (e.button !== 0) return
         const { clientX: x, clientY: y } = e
         hold.current = {
           x,
@@ -84,7 +99,7 @@ function PreviewCard({ book, preview }: { book: BookMeta; preview: PostPreview |
           timer: window.setTimeout(() => {
             hold.current!.fired = true
             navigator.vibrate?.(10)
-            setOpen(o => !o)
+            enter()
           }, HOLD_MS),
         }
       }}
@@ -96,25 +111,26 @@ function PreviewCard({ book, preview }: { book: BookMeta; preview: PostPreview |
       onPointerCancel={endHold}
       onContextMenu={e => e.preventDefault()}
       onClick={() => {
-        // the hold already did something; this click is just its finger lifting
+        // the hold already went in; this click is just its finger lifting
         if (hold.current?.fired) return void (hold.current = null)
-        go()
+        tap()
       }}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          go()
+          tap()
         }
       }}
     >
       {preview ? (
         <div
           ref={text}
-          className={cn(
-            'post-text',
-            !open && 'max-h-[11.5em] overflow-hidden',
-            !open && clipped && '[mask-image:linear-gradient(to_bottom,black_65%,transparent)]',
-          )}
+          data-clipped={(clipped && open === null) || undefined}
+          className="post-text preview-text overflow-hidden"
+          style={{ maxHeight: open === 'all' ? 'none' : open === null ? '11.5em' : `${open}px` }}
+          onTransitionEnd={e => {
+            if (e.propertyName === 'max-height' && typeof open === 'number') setOpen('all')
+          }}
           dangerouslySetInnerHTML={{ __html: preview.html }}
         />
       ) : (
@@ -125,8 +141,7 @@ function PreviewCard({ book, preview }: { book: BookMeta; preview: PostPreview |
           <div className="h-full rounded-full bg-primary" style={{ width: `${preview?.pct ?? book.progress}%` }} />
         </div>
         <span className="tabular-nums">{preview?.pct ?? book.progress}%</span>
-        {clipped && !open && <span className="max-[380px]:hidden">Hold to read more</span>}
-        <span className="font-bold text-primary">Keep reading ›</span>
+        <span className="font-bold text-primary">{clipped && open === null ? 'Read more' : 'Keep reading ›'}</span>
       </div>
     </PostShell>
   )
@@ -135,6 +150,7 @@ function PreviewCard({ book, preview }: { book: BookMeta; preview: PostPreview |
 /** The Home tab: the post each book being read is at, the most recently read first. */
 export function Home({ books, onLibrary }: { books: BookMeta[]; onLibrary: () => void }) {
   const { len } = usePrefs()
+  const navigate = useNavigate()
   const reading = books.filter(inProgress)
   // previews worked out here for books that had none: one book per run, newest first, so a big library doesn't load
   // every book at once; each one done starts the next
@@ -151,6 +167,16 @@ export function Home({ books, onLibrary }: { books: BookMeta[]; onLibrary: () =>
     }
   }, [books, made, len])
 
+  const list = useRef<HTMLDivElement>(null)
+  const entering = useRef(false)
+  /** The other previews ease away, then the card goes into its book (lib/morph). */
+  const enter = async (card: HTMLElement, id: string) => {
+    if (entering.current) return
+    entering.current = true
+    await leaveHome(card, [...(list.current?.querySelectorAll<HTMLElement>('[data-home-card]') ?? [])])
+    openWithMorph(card, id, () => navigate(`/read/${id}`))
+  }
+
   if (!reading.length)
     return (
       <div className="mx-auto max-w-[420px] px-8 py-12">
@@ -165,10 +191,15 @@ export function Home({ books, onLibrary }: { books: BookMeta[]; onLibrary: () =>
     )
 
   return (
-    <>
+    <div ref={list}>
       {reading.map(b => (
-        <PreviewCard key={b.id} book={b} preview={b.preview ?? made[b.id] ?? null} />
+        <PreviewCard
+          key={b.id}
+          book={b}
+          preview={b.preview ?? made[b.id] ?? null}
+          onEnter={card => void enter(card, b.id)}
+        />
       ))}
-    </>
+    </div>
   )
 }
