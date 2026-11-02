@@ -41,6 +41,8 @@ export type BookFormat = 'epub' | 'pdf' | 'sample'
 export interface BookMeta {
   id: string
   title: string
+  /** The title the file came with, kept once the reader renames the book so it can be restored. */
+  originalTitle?: string
   author: string
   format: BookFormat
   cover: string | null

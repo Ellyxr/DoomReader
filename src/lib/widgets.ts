@@ -57,8 +57,16 @@ export function publishLibrary(books: BookMeta[]) {
     ?.open(CACHE)
     .then(c => c.match(dataUrl('continue')))
     .then(r => r?.json())
-    .then((shown: { id?: string } | undefined) => {
-      if (shown?.id && shown.id === last?.id) return
+    .then(async (shown: { id?: string; title?: string; pct?: number } | undefined) => {
+      if (shown?.id && shown.id === last?.id) {
+        if (shown.title === last.title) return
+        // renamed: same book, new title on both widgets
+        void put('continue', { ...shown, title: last.title })
+        const c = await caches.open(CACHE)
+        const post = await (await c.match(dataUrl('post')))?.json()
+        if (post?.id === last.id) void put('post', { ...post, title: last.title })
+        return
+      }
       void put('continue', last && { id: last.id, title: last.title, author: last.author, pct: last.progress })
       // the post widget's text belongs to the old book; the reader fills it in again
       void put('post', null)

@@ -118,6 +118,19 @@ export async function saveState(state: ReadingState, progress: number) {
   await tx.done
 }
 
+export const MAX_TITLE = 500
+
+/** Gives the book a title of the reader's own. Renaming it back to the file's title forgets the original. */
+export async function renameBook(id: string, title: string) {
+  const db = await dbp
+  const meta = await db.get('books', id)
+  const next = title.trim().slice(0, MAX_TITLE)
+  if (!meta || !next) return
+  const { originalTitle = meta.title, ...rest } = meta
+  await db.put('books', next === originalTitle ? { ...rest, title: next } : { ...rest, title: next, originalTitle })
+  changed()
+}
+
 export async function markOpened(id: string) {
   const db = await dbp
   const meta = await db.get('books', id)

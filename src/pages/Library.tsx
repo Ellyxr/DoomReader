@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, Download, HardDrive, MoreHorizontal, Search, ShieldCheck, Smartphone, Trash2, Upload } from 'lucide-react'
+import {
+  Archive,
+  Download,
+  HardDrive,
+  MoreHorizontal,
+  Pencil,
+  Search,
+  ShieldCheck,
+  Smartphone,
+  Trash2,
+  Upload,
+} from 'lucide-react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 
@@ -21,7 +32,17 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { useInstallPrompt } from '@/hooks/useInstallPrompt'
-import { deleteBook, getState, listBooks, onLibraryChange, requestPersistence, storageInfo, type StorageInfo } from '@/lib/db'
+import {
+  deleteBook,
+  getState,
+  listBooks,
+  MAX_TITLE,
+  onLibraryChange,
+  renameBook,
+  requestPersistence,
+  storageInfo,
+  type StorageInfo,
+} from '@/lib/db'
 import { hash } from '@/lib/parse/html'
 import { GOAL, useStreak } from '@/lib/streak'
 import type { SyncPayload } from '@/lib/sync'
@@ -66,10 +87,12 @@ function BookRow({
   book,
   onDelete,
   onSync,
+  onRename,
 }: {
   book: BookMeta
   onDelete: (b: BookMeta) => void
   onSync: (b: BookMeta) => void
+  onRename: (b: BookMeta) => void
 }) {
   return (
     <div className="relative flex gap-3 border-b py-3 px-safe hover:bg-hover">
@@ -98,6 +121,10 @@ function BookRow({
           <MoreHorizontal className="size-[18px]" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="rounded-xl shadow-pop">
+          <DropdownMenuItem onSelect={() => onRename(book)}>
+            <Pencil />
+            Rename
+          </DropdownMenuItem>
           {book.openedAt && (
             <DropdownMenuItem onSelect={() => onSync(book)}>
               <Smartphone />
@@ -111,6 +138,73 @@ function BookRow({
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+  )
+}
+
+/** A new title for a book, with the file's own title one tap away once it has been renamed. `book` is null while closed. */
+function RenameDialog({ book, onClose }: { book: BookMeta | null; onClose: () => void }) {
+  const [title, setTitle] = useState('')
+  const [shownFor, setShownFor] = useState<BookMeta | null>(null)
+  // start from the current title each time the dialog opens for a book
+  if (book !== shownFor) {
+    setShownFor(book)
+    if (book) setTitle(book.title)
+  }
+  const next = title.trim()
+  const original = book?.originalTitle
+
+  const save = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!book || !next) return
+    if (next !== book.title) void renameBook(book.id, next).then(() => toast('Book renamed', { description: next }))
+    onClose()
+  }
+
+  return (
+    <AlertDialog open={!!book} onOpenChange={o => !o && onClose()}>
+      <AlertDialogContent className="max-w-[360px] rounded-2xl">
+        <form onSubmit={save} className="grid gap-4">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rename book</AlertDialogTitle>
+            <AlertDialogDescription>
+              Only changes the name shown in DoomReader. The file stays as it is.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid gap-1.5">
+            <Input
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              onFocus={e => e.currentTarget.select()}
+              maxLength={MAX_TITLE}
+              autoFocus
+              aria-label="Book title"
+              aria-invalid={!next || undefined}
+              className="rounded-xl"
+            />
+            {original && original !== next && (
+              <p className="px-1 text-[13px] leading-4 text-muted-foreground">
+                Original: <span className="text-foreground">{original}</span> ·{' '}
+                <button
+                  type="button"
+                  className="font-bold text-primary hover:underline"
+                  onClick={() => setTitle(original)}
+                >
+                  Restore
+                </button>
+              </p>
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button" className="rounded-full">
+              Cancel
+            </AlertDialogCancel>
+            <Button type="submit" className="rounded-full font-bold" disabled={!next || next === book?.title}>
+              Save
+            </Button>
+          </AlertDialogFooter>
+        </form>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
@@ -289,6 +383,7 @@ export default function Library() {
   const [info, setInfo] = useState<StorageInfo | null>(null)
   const [query, setQuery] = useState('')
   const [toDelete, setToDelete] = useState<BookMeta | null>(null)
+  const [toRename, setToRename] = useState<BookMeta | null>(null)
   const [syncing, setSyncing] = useState<SyncPayload | null>(null)
   const openSync = async (b: BookMeta) => {
     const state = (await getState(b.id)) ?? { id: b.id, seg: 0, likes: [], marks: [] }
@@ -388,7 +483,9 @@ export default function Library() {
           </div>
         )}
         {!!books?.length && !query && <StreakStrip />}
-        {shown?.map(b => <BookRow key={b.id} book={b} onDelete={setToDelete} onSync={b => void openSync(b)} />)}
+        {shown?.map(b => (
+          <BookRow key={b.id} book={b} onDelete={setToDelete} onSync={b => void openSync(b)} onRename={setToRename} />
+        ))}
         {shown && books && books.length > 0 && !shown.length && (
           <p className="px-safe py-8 text-center text-muted-foreground">No books match "{query}".</p>
         )}
@@ -424,6 +521,7 @@ export default function Library() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <RenameDialog book={toRename} onClose={() => setToRename(null)} />
       <SyncDialog payload={syncing} onClose={() => setSyncing(null)} />
       <Fab />
     </div>

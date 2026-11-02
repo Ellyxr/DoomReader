@@ -92,9 +92,11 @@ function cleanMeta(id: string, v: unknown, chapters: Chapter[]): BookMeta {
   const o = obj(v)
   const format = FORMATS.has(o.format as BookFormat) ? (o.format as BookFormat) : 'epub'
   const openedAt = num(o.openedAt, -1)
+  const originalTitle = str(o.originalTitle, 500)
   return {
     id,
     title: str(o.title, 500) || 'Untitled',
+    ...(originalTitle ? { originalTitle } : {}),
     author: str(o.author, 500) || 'Unknown author',
     format,
     cover: dataImage(o.cover),
