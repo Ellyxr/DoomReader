@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AlignLeft, ChevronDown, Pause, Play, SkipBack, SkipForward, Square, WholeWord } from 'lucide-react'
 
 import { BookAvatar } from '@/components/BookAvatar'
@@ -143,6 +143,8 @@ const SMALL = new Set(
     ' ',
   ),
 )
+const isSmall = (word: string) => SMALL.has(word.replace(/[^\p{L}\p{N}']/gu, '').toLowerCase())
+
 /** A phrase ends at a pause in the speech, or after this many words, whichever comes first. */
 const PHRASE_WORDS = 6
 
@@ -152,14 +154,17 @@ const PHRASE_WORDS = 6
  */
 function wordSize(word: string) {
   const core = word.replace(/[^\p{L}\p{N}']/gu, '')
-  let px = SMALL.has(core.toLowerCase()) ? 30 : core.length <= 4 ? 44 : core.length <= 7 ? 54 : 62
+  let px = isSmall(word) ? 30 : core.length <= 4 ? 44 : core.length <= 7 ? 54 : 62
   if (/[.!?…]["”’)]*$/.test(word)) px += 8
   return `min(${px}px, calc((min(100vw, 600px) - 48px) / ${(Math.max(core.length, 2) * 0.6).toFixed(2)}))`
 }
 
-/** The words of a sentence with their character offsets, cut into phrases. */
+/**
+ * The words of a sentence with their character offsets, cut into phrases. Within a phrase, a line ends after the
+ * small words that follow a big one, so the next big word starts the line below: "I WANTED to / SEE the / OCEAN."
+ */
 function phrasesOf(text: string) {
-  const words = [...text.matchAll(/\S+/g)].map(m => ({ text: m[0], at: m.index }))
+  const words = [...text.matchAll(/\S+/g)].map(m => ({ text: m[0], at: m.index, small: isSmall(m[0]), br: false }))
   const phrases: { first: number; last: number }[] = []
   let first = 0
   words.forEach((w, i) => {
@@ -168,6 +173,17 @@ function phrasesOf(text: string) {
       first = i + 1
     }
   })
+  for (const { first, last } of phrases) {
+    let big = false // the line so far has a big word
+    for (let i = first; i <= last; i++) {
+      const w = words[i]
+      if (!w.small) big = true
+      else if (big && i < last && !words[i + 1].small) {
+        w.br = true
+        big = false
+      }
+    }
+  }
   return { words, phrases }
 }
 
@@ -203,14 +219,17 @@ function Words({
       className="flex min-h-0 flex-1 flex-wrap content-center items-baseline gap-x-[0.28em] overflow-hidden py-6 text-left font-read leading-[1.02] font-black tracking-tight text-white"
     >
       {words.slice(phrase.first, current + 1).map((w, i) => (
-        <span
-          key={`${key}:${phrase.first + i}`}
-          aria-hidden
-          className={cn('word-pop inline-block max-w-full break-words', phrase.first + i < current && 'opacity-60')}
-          style={{ fontSize: wordSize(w.text) }}
-        >
-          {w.text}
-        </span>
+        <Fragment key={`${key}:${phrase.first + i}`}>
+          <span
+            aria-hidden
+            className={cn('word-pop inline-block max-w-full break-words', phrase.first + i < current && 'opacity-60')}
+            style={{ fontSize: wordSize(w.text) }}
+          >
+            {w.text}
+          </span>
+          {/* a full-width, zero-height item ends the line */}
+          {w.br && <span aria-hidden className="basis-full" />}
+        </Fragment>
       ))}
     </button>
   )

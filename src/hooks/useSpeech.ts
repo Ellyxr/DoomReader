@@ -36,11 +36,65 @@ const subscribeWord = (l: () => void) => {
 /** `{ key: "<post>:<chunk>", at }`, the start of the word being spoken in that sentence (-1 before the first). */
 export const useSpokenWord = () => useSyncExternalStore(subscribeWord, () => spoken)
 
-/** Characters a voice speaks per second at 1×, for timing words when the browser doesn't report them. */
-const CHARS_PER_SEC = 14
+/* ---------- timing words by estimate ---------- */
 
-/** Word starts in `text`, for stepping through it by estimate. */
-const wordStarts = (text: string) => [...text.matchAll(/\S+/g)].map(m => m.index)
+/**
+ * Seconds one unit of speech (about a syllable) takes at 1×. Starts at a typical voice's pace and is learned from how
+ * long sentences really take with this device's voice, so the estimate settles on its speed after a few sentences.
+ */
+const PACE_KEY = 'doomreader:tts-pace'
+const PACE = { start: 0.19, min: 0.08, max: 0.45 }
+/** Seconds between the voice starting and the first word being heard. */
+const LEAD = 0.1
+/** Word reports closer together than this (ms) weren't sent as the words were spoken, so they can't be trusted. */
+const BURST_MS = 40
+
+function loadPace() {
+  try {
+    const v = Number(localStorage.getItem(PACE_KEY))
+    return v >= PACE.min && v <= PACE.max ? v : PACE.start
+  } catch {
+    return PACE.start
+  }
+}
+let pace = loadPace()
+
+function learnPace(seconds: number, units: number) {
+  const sample = Math.min(PACE.max, Math.max(PACE.min, seconds / units))
+  pace = pace * 0.7 + sample * 0.3
+  try {
+    localStorage.setItem(PACE_KEY, pace.toFixed(4))
+  } catch {
+    /* learned again next time */
+  }
+}
+
+/** Some voices report every word at once rather than as it's spoken; once seen, their reports are ignored. */
+let burstyVoice = false
+
+/**
+ * Each word's start in `text` and when it is reached, in units from the start of the sentence: about one unit per
+ * syllable (vowel groups, or one per three letters for scripts without them), plus a pause after punctuation.
+ */
+function wordTimes(text: string) {
+  const words = [...text.matchAll(/\S+/g)]
+  let t = 0
+  const at: number[] = []
+  const when: number[] = []
+  words.forEach((m, i) => {
+    at.push(m.index)
+    when.push(t)
+    const w = m[0]
+    const core = w.replace(/[^\p{L}\p{N}]/gu, '')
+    t += Math.max(1, core.match(/[aeiouyàáâäèéêëìíîïòóôöùúûü]+/gi)?.length || Math.ceil(core.length / 3))
+    t += /\d/.test(core) ? core.replace(/\D/g, '').length * 0.6 : 0
+    if (i < words.length - 1) {
+      if (/[.!?…]["”’)\]]*$/.test(w)) t += 2.2
+      else if (/[,;:)\]]["”’]*$|[—–-]$/.test(w) || /^[—–(]/.test(words[i + 1][0])) t += 1.2
+    }
+  })
+  return { at, when, total: t }
+}
 
 /**
  * Reads the feed aloud with the browser's own voices (Web Speech API), a sentence at a time, calling `onPost` as each
@@ -87,31 +141,49 @@ export function useSpeech(posts: Post[], onPost: (i: number) => void, onFail: ()
     u.rate = live.current.rate
     u.lang = document.documentElement.lang || 'en'
     setSpoken(key, -1)
-    // Word timing: the voice's own word events where the browser sends them (most desktop voices, Safari); otherwise,
-    // as with many Android voices, an estimate from each word's length and the speed, which those events replace if
-    // they turn up after all.
-    let reported = false
-    const starts = wordStarts(text)
-    const estimate = (k: number) => {
-      if (reported || token !== run.current || k >= starts.length) return
-      setSpoken(key, starts[k])
-      const len = (starts[k + 1] ?? text.length) - starts[k]
-      guess.current = window.setTimeout(() => estimate(k + 1), (len / (CHARS_PER_SEC * u.rate)) * 1000)
+    // Word timing runs on a clock: each word is shown when the voice should reach it, from its syllables, the pauses
+    // before it and the pace learned for this voice. The voice's own word reports (most desktop voices, Safari) set
+    // the clock right as they come; voices that send none, or only some, are carried along by the estimate.
+    const { at, when, total } = wordTimes(text)
+    const secs = (units: number) => (LEAD + (units * pace) / u.rate) * 1000
+    let t0 = 0 // when the clock says the sentence started (performance.now())
+    let started = 0 // when the voice really started, for learning its pace
+    let lastReport = -Infinity
+    const show = (k: number) => {
+      clearTimeout(guess.current)
+      if (token !== run.current || k >= at.length) return
+      setSpoken(key, at[k])
+      if (k + 1 < at.length)
+        guess.current = window.setTimeout(() => show(k + 1), Math.max(0, t0 + secs(when[k + 1]) - performance.now()))
     }
     u.onstart = () => {
       if (token !== run.current) return
-      clearTimeout(guess.current)
-      guess.current = window.setTimeout(() => estimate(0), 250)
+      started = t0 = performance.now()
+      guess.current = window.setTimeout(() => show(0), secs(0))
     }
     u.onboundary = e => {
-      if (token !== run.current || e.name !== 'word') return
-      reported = true
-      clearTimeout(guess.current)
-      setSpoken(key, e.charIndex)
+      if (token !== run.current || e.name !== 'word' || burstyVoice) return
+      const now = performance.now()
+      if (now - lastReport < BURST_MS) {
+        // reports arriving all at once say nothing about timing: back to the clock, where it would have been
+        burstyVoice = true
+        let k = 0
+        while (k + 1 < at.length && t0 + secs(when[k + 1]) <= now) k++
+        return show(k)
+      }
+      lastReport = now
+      let k = 0
+      while (k + 1 < at.length && at[k + 1] <= e.charIndex) k++
+      // the voice is at word k now: move the clock so the words after it follow from here
+      t0 = now - secs(when[k])
+      show(k)
     }
     u.onend = () => {
       clearTimeout(guess.current)
       if (token !== run.current) return
+      // learn this voice's pace from sentences long enough to say something about it
+      const heard = (performance.now() - started) / 1000 - LEAD
+      if (started && at.length >= 4 && heard > 0.5) learnPace(heard * u.rate, total)
       errors.current = 0
       pos.current.chunk++
       speak()
